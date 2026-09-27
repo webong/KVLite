@@ -95,6 +95,30 @@ func (e *engine) Delete(ctx context.Context, key []byte) error {
 	return e.db.Update(func(txn *badger.Txn) error { return txn.Delete(key) })
 }
 
+func (e *engine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return e.db.Update(func(txn *badger.Txn) error {
+		for _, mutation := range mutations {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if len(mutation.Key) == 0 {
+				return kvlite.ErrInvalidArgument
+			}
+			if mutation.Delete {
+				if err := txn.Delete(mutation.Key); err != nil {
+					return err
+				}
+			} else if err := txn.Set(mutation.Key, mutation.Value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (e *engine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err

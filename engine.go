@@ -13,8 +13,33 @@ type Engine interface {
 	Get(context.Context, []byte) ([]byte, bool, error)
 	Put(context.Context, []byte, []byte) error
 	Delete(context.Context, []byte) error
+	// Apply commits every mutation in order, atomically: no proper subset may
+	// become visible. A commit-time I/O error can leave the outcome unknown;
+	// callers must inspect the database before retrying. An empty batch is a no-op.
+	Apply(context.Context, []Mutation) error
 	ScanPrefix(context.Context, []byte, func(key, value []byte) error) error
 	Close() error
+}
+
+// Mutation is one raw KVLite record change. Delete removes Key; otherwise
+// Value (including an empty value) replaces it. Engines must not retain the
+// caller's slices after Apply returns.
+type Mutation struct {
+	Key    []byte `json:"key"`
+	Value  []byte `json:"value,omitempty"`
+	Delete bool   `json:"delete,omitempty"`
+}
+
+func validateMutations(ctx context.Context, mutations []Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, mutation := range mutations {
+		if len(mutation.Key) == 0 {
+			return ErrInvalidArgument
+		}
+	}
+	return nil
 }
 
 var errAtomicListPushUnsupported = errors.New("kvlite: engine does not support atomic list push")
@@ -57,6 +82,21 @@ func (engine *guardedEngine) Delete(ctx context.Context, key []byte) error {
 		return ErrClosed
 	}
 	return engine.inner.Delete(ctx, key)
+}
+
+func (engine *guardedEngine) Apply(ctx context.Context, mutations []Mutation) error {
+	engine.mu.RLock()
+	defer engine.mu.RUnlock()
+	if engine.closed {
+		return ErrClosed
+	}
+	if err := validateMutations(ctx, mutations); err != nil {
+		return err
+	}
+	if len(mutations) == 0 {
+		return nil
+	}
+	return engine.inner.Apply(ctx, mutations)
 }
 
 func (engine *guardedEngine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {

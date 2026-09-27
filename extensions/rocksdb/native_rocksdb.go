@@ -102,6 +102,28 @@ func (engine *engine) Delete(ctx context.Context, key []byte) error {
 	return engine.db.Delete(engine.write, key)
 }
 
+func (engine *engine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	batch := grocksdb.NewWriteBatch()
+	defer batch.Destroy()
+	for _, mutation := range mutations {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(mutation.Key) == 0 {
+			return kvlite.ErrInvalidArgument
+		}
+		if mutation.Delete {
+			batch.Delete(mutation.Key)
+		} else {
+			batch.Put(mutation.Key, mutation.Value)
+		}
+	}
+	return engine.db.Write(engine.write, batch)
+}
+
 func (engine *engine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	iterator := engine.db.NewIterator(engine.read)
 	defer iterator.Close()

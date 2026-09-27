@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"net"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -14,8 +16,9 @@ import (
 )
 
 type redisTestEngine struct {
-	mu     sync.RWMutex
-	values map[string][]byte
+	mu         sync.RWMutex
+	values     map[string][]byte
+	applyError error
 }
 
 func newRedisTestEngine() *redisTestEngine {
@@ -50,6 +53,55 @@ func (engine *redisTestEngine) Delete(ctx context.Context, key []byte) error {
 	defer engine.mu.Unlock()
 	delete(engine.values, string(key))
 	return nil
+}
+
+func (engine *redisTestEngine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, mutation := range mutations {
+		if len(mutation.Key) == 0 {
+			return kvlite.ErrInvalidArgument
+		}
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if engine.applyError != nil {
+		return engine.applyError
+	}
+	for _, mutation := range mutations {
+		if mutation.Delete {
+			delete(engine.values, string(mutation.Key))
+		} else {
+			engine.values[string(mutation.Key)] = append([]byte(nil), mutation.Value...)
+		}
+	}
+	return nil
+}
+
+func TestFailedRedisSetPreservesOldCollection(t *testing.T) {
+	storage := newRedisTestEngine()
+	db, err := kvlite.OpenWithEngine(storage, kvlite.BackendRemote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if _, err := db.SAdd(ctx, "shared", "first", "second"); err != nil {
+		t.Fatal(err)
+	}
+	storage.mu.Lock()
+	storage.applyError = errors.New("injected batch failure")
+	storage.mu.Unlock()
+	redisDB := newDatabase(db.Protocol())
+	reply := redisDB.redisSet([][]byte{[]byte("SET"), []byte("shared"), []byte("scalar")})
+	if reply.kind != respError {
+		t.Fatalf("SET reply = %#v, want error", reply)
+	}
+	members, err := db.SMembers(ctx, "shared")
+	if err != nil || !slices.Equal(members, []string{"first", "second"}) {
+		t.Fatalf("old set changed after failed SET: %v, %v", members, err)
+	}
 }
 
 func (engine *redisTestEngine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {

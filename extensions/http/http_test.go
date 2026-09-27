@@ -93,6 +93,27 @@ func (engine *testEngine) Delete(ctx context.Context, key []byte) error {
 	return nil
 }
 
+func (engine *testEngine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, mutation := range mutations {
+		if len(mutation.Key) == 0 {
+			return kvlite.ErrInvalidArgument
+		}
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	for _, mutation := range mutations {
+		if mutation.Delete {
+			delete(engine.values, string(mutation.Key))
+		} else {
+			engine.values[string(mutation.Key)] = append([]byte(nil), mutation.Value...)
+		}
+	}
+	return nil
+}
+
 func (engine *testEngine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	engine.mu.RLock()
 	keys := make([]string, 0)
@@ -133,6 +154,43 @@ func openTestOwner(t *testing.T, serverOptions Options) (*kvlite.DB, *Server) {
 	}
 	t.Cleanup(func() { _ = server.Close() })
 	return owner, server
+}
+
+func TestRemoteAtomicBatchAndLogicalReplacement(t *testing.T) {
+	owner, server := openTestOwner(t, Options{ListenAddress: "127.0.0.1:0", BearerToken: "secret"})
+	remote, err := Connect(server.URL(), ClientOptions{BearerToken: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remote.Close() })
+	ctx := context.Background()
+	if _, err := remote.SAdd(ctx, "shared", "first", "second"); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Put(ctx, "shared", "scalar"); err != nil {
+		t.Fatal(err)
+	}
+	var value string
+	if err := owner.Get(ctx, "shared", &value); err != nil || value != "scalar" {
+		t.Fatalf("owner scalar = %q, %v", value, err)
+	}
+	if members, err := owner.SMembers(ctx, "shared"); err != nil || len(members) != 0 {
+		t.Fatalf("old remote set remains: %v, %v", members, err)
+	}
+	store := remote.Transport()
+	if err := store.Apply(ctx, []kvlite.Mutation{
+		{Key: []byte("raw:a"), Value: []byte("old")},
+		{Key: []byte("raw:a"), Delete: true},
+		{Key: []byte("raw:b"), Value: []byte("new")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := owner.Transport().Get(ctx, []byte("raw:a")); err != nil || found {
+		t.Fatalf("deleted raw key found = %t, %v", found, err)
+	}
+	if got, found, err := owner.Transport().Get(ctx, []byte("raw:b")); err != nil || !found || string(got) != "new" {
+		t.Fatalf("new raw key = %q, %t, %v", got, found, err)
+	}
 }
 
 func TestServeAndConnectAreExplicitExtensions(t *testing.T) {

@@ -34,7 +34,8 @@
  *   envelopes, no key mangling, no TTL synthesis. TTLs live in envelopes
  *   managed above the engine by the core.
  * - Scans snapshot at open; later writes are not visible through an open
- *   cursor. An empty prefix matches every key.
+ *   cursor. An empty prefix matches every key. Scan operations and the
+ *   companion atomic-apply symbol are required by current KVLite hosts.
  */
 #ifndef KVLITE_MODULE_H
 #define KVLITE_MODULE_H
@@ -50,6 +51,23 @@ extern "C" {
 
 /* Well-known entry-point name a native module must export. */
 #define KVLITE_MODULE_INIT_SYMBOL "kvlite_module_init_v1"
+
+/* Required companion symbol for hosts that require atomic record batches.
+ * Keeping it outside the v1 operation table avoids reading past a legacy
+ * module's smaller table. Such a module is rejected at load time. */
+#define KVLITE_MODULE_APPLY_SYMBOL "kvlite_module_apply_v1"
+
+typedef struct {
+    const void *key;
+    size_t key_length;
+    const void *value;
+    size_t value_length;
+    int is_delete;
+} kvlite_module_mutation;
+
+int kvlite_module_apply_v1(unsigned long long handle,
+                           const kvlite_module_mutation *mutations,
+                           size_t count, char **out_error);
 
 /* Storage-driver operation table provided by the module. */
 typedef struct {

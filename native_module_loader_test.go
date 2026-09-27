@@ -77,6 +77,21 @@ func TestNativeModuleDriverLoad(t *testing.T) {
 	if err := store.Put(ctx, []byte("native:raw/2"), []byte("two")); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Apply(ctx, []Mutation{
+		{Key: []byte("native:raw/1"), Delete: true},
+		{Key: []byte("native:raw/3"), Value: []byte("three")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Apply(ctx, []Mutation{
+		{Key: []byte("native:raw/3"), Value: []byte("changed")},
+		{Key: nil, Value: []byte("invalid")},
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid native batch error = %v", err)
+	}
+	if value, found, err := store.Get(ctx, []byte("native:raw/3")); err != nil || !found || string(value) != "three" {
+		t.Fatalf("native batch rollback = %q, %t, %v", value, found, err)
+	}
 	var scanned []string
 	if err := store.ScanPrefix(ctx, []byte("native:raw/"), func(key, value []byte) error {
 		scanned = append(scanned, string(key)+"="+string(value))

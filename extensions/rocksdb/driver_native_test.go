@@ -10,8 +10,13 @@ import (
 	"testing"
 
 	"github.com/webong/kvlite"
+	"github.com/webong/kvlite/enginetest"
 	_ "github.com/webong/kvlite/extensions/rocksdb"
 )
+
+func TestAtomicMutations(t *testing.T) {
+	enginetest.RunAtomicMutations(t, kvlite.DriverRocksDB)
+}
 
 // TestRocksDBDriverOpensAndPersistsKVLiteRecords exercises the actual cgo
 // adapter rather than merely compiling it. It is the native smoke test used

@@ -15,6 +15,14 @@ package kvlite
 #endif
 
 typedef unsigned long long kvlite_handle_t;
+typedef struct {
+	const void *key;
+	size_t key_length;
+	const void *value;
+	size_t value_length;
+	int is_delete;
+} kvlite_module_mutation;
+typedef int (*kvlite_module_apply_fn)(kvlite_handle_t, const kvlite_module_mutation *, size_t, char **);
 
 typedef struct {
 	int (*open)(const char *, kvlite_handle_t *, char **);
@@ -47,6 +55,7 @@ typedef struct kvlite_native_registration {
 typedef struct {
 	void *library;
 	kvlite_native_ops_v1 ops;
+	kvlite_module_apply_fn apply;
 	kvlite_native_registration *registrations;
 	char *error;
 } kvlite_native_state;
@@ -133,7 +142,8 @@ static int native_register_driver(const kvlite_native_info_v1 *info, const kvlit
 		return 1;
 	}
 	if (ops->open == NULL || ops->close == NULL || ops->put == NULL ||
-	    ops->get == NULL || ops->delete == NULL || ops->free == NULL) {
+	    ops->get == NULL || ops->delete == NULL || ops->scan_open == NULL ||
+	    ops->scan_next == NULL || ops->scan_close == NULL || ops->free == NULL) {
 		native_set_error(out_error, "module driver is missing a required operation");
 		return 1;
 	}
@@ -151,6 +161,8 @@ static int native_register_driver(const kvlite_native_info_v1 *info, const kvlit
 	state->registrations = registration;
 	return 0;
 }
+
+static void native_free_registrations(kvlite_native_state *state);
 
 static int native_load_module(const char *path, kvlite_native_state *state, char **out_error) {
 	if (path == NULL || path[0] == '\0') {
@@ -186,6 +198,7 @@ static int native_load_module(const char *path, kvlite_native_state *state, char
 	if (status != 0) {
 		native_set_error(out_error, init_error == NULL || init_error[0] == '\0' ? "module initialization failed" : init_error);
 		free(init_error);
+		native_free_registrations(state);
 #ifdef _WIN32
 		FreeLibrary((HMODULE)state->library);
 #else
@@ -196,6 +209,18 @@ static int native_load_module(const char *path, kvlite_native_state *state, char
 	}
 	if (state->registrations == NULL) {
 		native_set_error(out_error, "module initialized without registering a driver");
+#ifdef _WIN32
+		FreeLibrary((HMODULE)state->library);
+#else
+		dlclose(state->library);
+#endif
+		state->library = NULL;
+		return 1;
+	}
+	state->apply = (kvlite_module_apply_fn)native_resolve_symbol(state->library, "kvlite_module_apply_v1");
+	if (state->apply == NULL) {
+		native_set_error(out_error, "module is missing required atomic symbol kvlite_module_apply_v1");
+		native_free_registrations(state);
 #ifdef _WIN32
 		FreeLibrary((HMODULE)state->library);
 #else
@@ -225,8 +250,7 @@ static void native_free_registrations(kvlite_native_state *state) {
 }
 
 // The wrappers below drive the selected registration's operation table.
-// Scan members are optional: a module without them serves key operations and
-// reports scans as unavailable.
+// All operations are required for the KVLite logical record model.
 static int native_ops_open(kvlite_native_state *state, const char *path, kvlite_handle_t *out_handle, char **out_error) {
 	return state->ops.open(path, out_handle, out_error);
 }
@@ -245,6 +269,10 @@ static int native_ops_get(kvlite_native_state *state, kvlite_handle_t handle, co
 
 static int native_ops_delete(kvlite_native_state *state, kvlite_handle_t handle, const void *key, size_t key_length, char **out_error) {
 	return state->ops.delete(handle, key, key_length, out_error);
+}
+
+static int native_ops_apply(kvlite_native_state *state, kvlite_handle_t handle, const kvlite_module_mutation *mutations, size_t count, char **out_error) {
+	return state->apply(handle, mutations, count, out_error);
 }
 
 static int native_ops_scan_open(kvlite_native_state *state, kvlite_handle_t handle, const void *prefix, size_t prefix_length, kvlite_handle_t *out_cursor, char **out_error) {
@@ -398,6 +426,7 @@ func loadNativeModuleLibrary(module Module, wanted DriverName) (*nativeModuleLib
 	library := &nativeModuleLibrary{state: &C.kvlite_native_state{}}
 	library.state.library = state.library
 	library.state.ops = opsTables[matched]
+	library.state.apply = state.apply
 	library.state.registrations = nil
 	library.state.error = nil
 	return library, selected, nil
@@ -527,6 +556,51 @@ func (engine *nativeModuleEngine) Delete(_ context.Context, key []byte) error {
 	cError := (*C.char)(nil)
 	status := C.native_ops_delete(engine.library.state, C.ulonglong(engine.handle), keyPointer, C.size_t(len(key)), &cError)
 	return nativeModuleStatusError(status, readCStringAndFree(cError), "delete")
+}
+
+func (engine *nativeModuleEngine) Apply(ctx context.Context, mutations []Mutation) error {
+	if engine.closed {
+		return ErrClosed
+	}
+	if err := validateMutations(ctx, mutations); err != nil {
+		return err
+	}
+	count := len(mutations)
+	var changes *C.kvlite_module_mutation
+	if count > 0 {
+		changes = (*C.kvlite_module_mutation)(C.calloc(C.size_t(count), C.size_t(C.sizeof_kvlite_module_mutation)))
+		if changes == nil {
+			return fmt.Errorf("kvlite: allocate mutation batch: out of memory")
+		}
+		defer C.free(unsafe.Pointer(changes))
+	}
+	items := unsafe.Slice(changes, count)
+	defer func() {
+		for _, item := range items {
+			C.free(unsafe.Pointer(item.key))
+			C.free(unsafe.Pointer(item.value))
+		}
+	}()
+	for index, mutation := range mutations {
+		items[index].key = C.CBytes(mutation.Key)
+		if items[index].key == nil {
+			return fmt.Errorf("kvlite: allocate mutation key: out of memory")
+		}
+		items[index].key_length = C.size_t(len(mutation.Key))
+		if len(mutation.Value) > 0 {
+			items[index].value = C.CBytes(mutation.Value)
+			if items[index].value == nil {
+				return fmt.Errorf("kvlite: allocate mutation value: out of memory")
+			}
+		}
+		items[index].value_length = C.size_t(len(mutation.Value))
+		if mutation.Delete {
+			items[index].is_delete = 1
+		}
+	}
+	cError := (*C.char)(nil)
+	status := C.native_ops_apply(engine.library.state, C.ulonglong(engine.handle), changes, C.size_t(count), &cError)
+	return nativeModuleStatusError(status, readCStringAndFree(cError), "apply")
 }
 
 func (engine *nativeModuleEngine) ScanPrefix(_ context.Context, prefix []byte, callback func(key, value []byte) error) error {

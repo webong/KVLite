@@ -125,13 +125,8 @@ static int memdb_close(unsigned long long handle, char **out_error) {
     return 0;
 }
 
-static int memdb_put(unsigned long long handle, const void *key, size_t key_length,
-                     const void *value, size_t value_length, char **out_error) {
-    memdb_db *db = memdb_lookup(handle);
-    if (db == NULL) {
-        memdb_set_error(out_error, "invalid database handle");
-        return 2;
-    }
+static int memdb_put_into(memdb_db *db, const void *key, size_t key_length,
+                          const void *value, size_t value_length, char **out_error) {
     if (key == NULL || key_length == 0) {
         memdb_set_error(out_error, "key is required");
         return 2;
@@ -175,6 +170,16 @@ static int memdb_put(unsigned long long handle, const void *key, size_t key_leng
     return 0;
 }
 
+static int memdb_put(unsigned long long handle, const void *key, size_t key_length,
+                     const void *value, size_t value_length, char **out_error) {
+    memdb_db *db = memdb_lookup(handle);
+    if (db == NULL) {
+        memdb_set_error(out_error, "invalid database handle");
+        return 2;
+    }
+    return memdb_put_into(db, key, key_length, value, value_length, out_error);
+}
+
 static int memdb_get(unsigned long long handle, const void *key, size_t key_length,
                      void **out_value, size_t *out_length, char **out_error) {
     memdb_db *db = memdb_lookup(handle);
@@ -201,12 +206,7 @@ static int memdb_get(unsigned long long handle, const void *key, size_t key_leng
     return 1;
 }
 
-static int memdb_delete(unsigned long long handle, const void *key, size_t key_length, char **out_error) {
-    memdb_db *db = memdb_lookup(handle);
-    if (db == NULL) {
-        memdb_set_error(out_error, "invalid database handle");
-        return 2;
-    }
+static int memdb_delete_from(memdb_db *db, const void *key, size_t key_length, char **out_error) {
     if (key == NULL || key_length == 0) {
         memdb_set_error(out_error, "key is required");
         return 2;
@@ -220,6 +220,69 @@ static int memdb_delete(unsigned long long handle, const void *key, size_t key_l
             return 0;
         }
     }
+    return 0;
+}
+
+static int memdb_delete(unsigned long long handle, const void *key, size_t key_length, char **out_error) {
+    memdb_db *db = memdb_lookup(handle);
+    if (db == NULL) {
+        memdb_set_error(out_error, "invalid database handle");
+        return 2;
+    }
+    return memdb_delete_from(db, key, key_length, out_error);
+}
+
+static void memdb_release_pairs(memdb_db *db) {
+    for (size_t i = 0; i < db->count; i++) {
+        free(db->pairs[i].key);
+        free(db->pairs[i].value);
+    }
+    free(db->pairs);
+    db->pairs = NULL;
+    db->count = 0;
+    db->capacity = 0;
+}
+
+int kvlite_module_apply_v1(unsigned long long handle,
+                           const kvlite_module_mutation *mutations,
+                           size_t count, char **out_error) {
+    memdb_db *db = memdb_lookup(handle);
+    if (db == NULL || (count > 0 && mutations == NULL)) {
+        memdb_set_error(out_error, "invalid mutation batch or database handle");
+        return 2;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (mutations[i].key == NULL || mutations[i].key_length == 0 ||
+            (!mutations[i].is_delete && mutations[i].value_length > 0 && mutations[i].value == NULL)) {
+            memdb_set_error(out_error, "invalid mutation");
+            return 2;
+        }
+    }
+    memdb_db staged = {0};
+    staged.live = 1;
+    for (size_t i = 0; i < db->count; i++) {
+        int status = memdb_put_into(&staged, db->pairs[i].key, db->pairs[i].key_length,
+                                    db->pairs[i].value, db->pairs[i].value_length, out_error);
+        if (status != 0) {
+            memdb_release_pairs(&staged);
+            return status;
+        }
+    }
+    for (size_t i = 0; i < count; i++) {
+        const kvlite_module_mutation *change = &mutations[i];
+        int status = change->is_delete
+            ? memdb_delete_from(&staged, change->key, change->key_length, out_error)
+            : memdb_put_into(&staged, change->key, change->key_length,
+                             change->value, change->value_length, out_error);
+        if (status != 0) {
+            memdb_release_pairs(&staged);
+            return status;
+        }
+    }
+    memdb_release_pairs(db);
+    db->pairs = staged.pairs;
+    db->count = staged.count;
+    db->capacity = staged.capacity;
     return 0;
 }
 

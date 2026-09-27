@@ -8,11 +8,15 @@ package berkeleydb
 
 // macOS still ships a legacy db.h that is not Oracle Berkeley DB. Require the
 // C API surface this adapter uses, rather than one exact Berkeley DB release.
-#if !defined(DB_VERSION_MAJOR) || !defined(DB_VERSION_MINOR) || \
-	!defined(DB_BTREE) || !defined(DB_CREATE) || !defined(DB_THREAD) || \
-	!defined(DB_SET_RANGE) || !defined(DB_NOTFOUND)
+#if !defined(DB_VERSION_MAJOR) || !defined(DB_VERSION_MINOR)
 #error "KVLite Berkeley DB requires a compatible modern Berkeley DB C API; set CGO_CFLAGS and CGO_LDFLAGS to the intended Berkeley DB installation"
 #endif
+
+// Some Berkeley DB flags are enum constants, not preprocessor macros. A C
+// expression checks the actual API instead of incorrectly rejecting them.
+enum { kvlite_bdb_required_api = DB_BTREE + DB_CREATE + DB_THREAD +
+	DB_SET_RANGE + DB_NOTFOUND + DB_AUTO_COMMIT + DB_RECOVER + DB_INIT_MPOOL +
+	DB_INIT_LOCK + DB_INIT_LOG + DB_INIT_TXN };
 
 #include <errno.h>
 #include <stdint.h>
@@ -70,32 +74,47 @@ static int kvlite_bdb_copy_pair(const DBT *key, const DBT *value,
 	return status;
 }
 
-static int kvlite_bdb_open(const char *path, DB **out) {
+static int kvlite_bdb_open(const char *home, const char *filename, DB_ENV **out_env, DB **out) {
+	DB_ENV *env = NULL;
 	DB *db = NULL;
 	int status;
 
-	if (path == NULL || out == NULL) {
+	if (home == NULL || filename == NULL || out_env == NULL || out == NULL) {
 		return EINVAL;
 	}
+	*out_env = NULL;
 	*out = NULL;
-	status = db_create(&db, NULL, 0);
+	status = db_env_create(&env, 0);
 	if (status != 0) {
 		return status;
 	}
-	status = db->open(db, NULL, path, NULL, DB_BTREE, DB_CREATE | DB_THREAD, 0600);
+	status = env->open(env, home, DB_CREATE | DB_RECOVER | DB_INIT_MPOOL |
+		DB_INIT_LOCK | DB_INIT_LOG | DB_INIT_TXN | DB_THREAD, 0700);
+	if (status != 0) {
+		(void)env->close(env, 0);
+		return status;
+	}
+	status = db_create(&db, env, 0);
+	if (status != 0) {
+		(void)env->close(env, 0);
+		return status;
+	}
+	status = db->open(db, NULL, filename, NULL, DB_BTREE,
+		DB_CREATE | DB_THREAD | DB_AUTO_COMMIT, 0600);
 	if (status != 0) {
 		(void)db->close(db, 0);
+		(void)env->close(env, 0);
 		return status;
 	}
+	*out_env = env;
 	*out = db;
 	return 0;
 }
 
-static int kvlite_bdb_close(DB *db) {
-	if (db == NULL) {
-		return 0;
-	}
-	return db->close(db, 0);
+static int kvlite_bdb_close(DB *db, DB_ENV *env) {
+	int status = db == NULL ? 0 : db->close(db, 0);
+	int env_status = env == NULL ? 0 : env->close(env, 0);
+	return status != 0 ? status : env_status;
 }
 
 static int kvlite_bdb_get(DB *db, const void *key_data, size_t key_length,
@@ -112,11 +131,14 @@ static int kvlite_bdb_get(DB *db, const void *key_data, size_t key_length,
 		return status;
 	}
 	memset(&value, 0, sizeof(value));
+	value.flags = DB_DBT_MALLOC;
 	status = db->get(db, NULL, &key, &value, 0);
 	if (status != 0) {
 		return status;
 	}
-	return kvlite_bdb_copy_dbt(&value, out_value, out_value_length);
+	status = kvlite_bdb_copy_dbt(&value, out_value, out_value_length);
+	free(value.data);
+	return status;
 }
 
 static int kvlite_bdb_put(DB *db, const void *key_data, size_t key_length,
@@ -136,7 +158,7 @@ static int kvlite_bdb_put(DB *db, const void *key_data, size_t key_length,
 	if (status != 0) {
 		return status;
 	}
-	return db->put(db, NULL, &key, &value, 0);
+	return db->put(db, NULL, &key, &value, DB_AUTO_COMMIT);
 }
 
 static int kvlite_bdb_delete(DB *db, const void *key_data, size_t key_length) {
@@ -150,8 +172,34 @@ static int kvlite_bdb_delete(DB *db, const void *key_data, size_t key_length) {
 	if (status != 0) {
 		return status;
 	}
-	return db->del(db, NULL, &key, 0);
+	return db->del(db, NULL, &key, DB_AUTO_COMMIT);
 }
+
+static int kvlite_bdb_txn_begin(DB_ENV *env, DB_TXN **out) {
+	return env->txn_begin(env, NULL, out, 0);
+}
+
+static int kvlite_bdb_txn_put(DB *db, DB_TXN *txn, const void *key_data,
+	size_t key_length, const void *value_data, size_t value_length) {
+	DBT key;
+	DBT value;
+	int status = kvlite_bdb_dbt(&key, key_data, key_length);
+	if (status != 0) return status;
+	status = kvlite_bdb_dbt(&value, value_data, value_length);
+	if (status != 0) return status;
+	return db->put(db, txn, &key, &value, 0);
+}
+
+static int kvlite_bdb_txn_delete(DB *db, DB_TXN *txn, const void *key_data,
+	size_t key_length) {
+	DBT key;
+	int status = kvlite_bdb_dbt(&key, key_data, key_length);
+	if (status != 0) return status;
+	return db->del(db, txn, &key, 0);
+}
+
+static int kvlite_bdb_txn_commit(DB_TXN *txn) { return txn->commit(txn, 0); }
+static int kvlite_bdb_txn_abort(DB_TXN *txn) { return txn->abort(txn); }
 
 static int kvlite_bdb_cursor_open(DB *db, DBC **out) {
 	if (db == NULL || out == NULL) {
@@ -206,7 +254,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"unsafe"
 
 	"github.com/webong/kvlite"
@@ -215,19 +262,22 @@ import (
 func nativeAvailable() error { return nil }
 
 type engine struct {
-	db *C.DB
+	db  *C.DB
+	env *C.DB_ENV
 }
 
 func openNative(path string, _ kvlite.DriverOptions) (kvlite.Engine, error) {
-	filename := filepath.Join(path, DatabaseFilename)
-	cFilename := C.CString(filename)
+	cHome := C.CString(path)
+	defer C.free(unsafe.Pointer(cHome))
+	cFilename := C.CString(DatabaseFilename)
 	defer C.free(unsafe.Pointer(cFilename))
 
 	var database *C.DB
-	if status := C.kvlite_bdb_open(cFilename, &database); status != 0 {
+	var env *C.DB_ENV
+	if status := C.kvlite_bdb_open(cHome, cFilename, &env, &database); status != 0 {
 		return nil, bdbError("open", status)
 	}
-	return &engine{db: database}, nil
+	return &engine{db: database, env: env}, nil
 }
 
 func (engine *engine) Get(ctx context.Context, key []byte) ([]byte, bool, error) {
@@ -269,6 +319,52 @@ func (engine *engine) Delete(ctx context.Context, key []byte) error {
 		return nil
 	}
 	return bdbError("delete", status)
+}
+
+func (engine *engine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, mutation := range mutations {
+		if len(mutation.Key) == 0 {
+			return kvlite.ErrInvalidArgument
+		}
+	}
+	if len(mutations) == 0 {
+		return nil
+	}
+	var txn *C.DB_TXN
+	if status := C.kvlite_bdb_txn_begin(engine.env, &txn); status != 0 {
+		return bdbError("begin transaction", status)
+	}
+	defer func() {
+		if txn != nil {
+			_ = C.kvlite_bdb_txn_abort(txn)
+		}
+	}()
+	for _, mutation := range mutations {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var status C.int
+		if mutation.Delete {
+			status = C.kvlite_bdb_txn_delete(engine.db, txn, bytePointer(mutation.Key), C.size_t(len(mutation.Key)))
+			if status == C.kvlite_bdb_notfound {
+				continue
+			}
+		} else {
+			status = C.kvlite_bdb_txn_put(engine.db, txn, bytePointer(mutation.Key), C.size_t(len(mutation.Key)), bytePointer(mutation.Value), C.size_t(len(mutation.Value)))
+		}
+		if status != 0 {
+			return bdbError("apply", status)
+		}
+	}
+	committing := txn
+	txn = nil
+	if status := C.kvlite_bdb_txn_commit(committing); status != 0 {
+		return bdbError("commit transaction", status)
+	}
+	return nil
 }
 
 func (engine *engine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) (err error) {
@@ -325,8 +421,9 @@ func (engine *engine) ScanPrefix(ctx context.Context, prefix []byte, callback fu
 }
 
 func (engine *engine) Close() error {
-	status := C.kvlite_bdb_close(engine.db)
+	status := C.kvlite_bdb_close(engine.db, engine.env)
 	engine.db = nil
+	engine.env = nil
 	if status != 0 {
 		return bdbError("close", status)
 	}

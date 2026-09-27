@@ -8,8 +8,13 @@ import (
 	"testing"
 
 	"github.com/webong/kvlite"
+	"github.com/webong/kvlite/enginetest"
 	_ "github.com/webong/kvlite/extensions/leveldb"
 )
+
+func TestAtomicMutations(t *testing.T) {
+	enginetest.RunAtomicMutations(t, kvlite.DriverLevelDB)
+}
 
 func TestLevelDBDriverOpensAndPersistsKVLiteRecords(t *testing.T) {
 	if got := kvlite.DefaultDriver(); got != kvlite.DriverLevelDB {

@@ -3,6 +3,9 @@
 This is KVLite's opt-in adapter for the Berkeley DB C API. It stores one Btree
 file named `KVLITE-BERKELEYDB.db` beside KVLite's normal
 `KVLITE-MANIFEST.json`, so it cannot be confused with RocksDB or LevelDB data.
+It opens a transactional Berkeley DB environment in that directory; batch
+changes use one native transaction and Berkeley DB also creates log and
+environment files there.
 It is never imported by KVLite core, enabled by the default CLI, or included in
 the default release bundles.
 

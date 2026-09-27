@@ -254,7 +254,8 @@ kvlite serve --path ./data --driver leveldb --extension-mode standalone --listen
 ```
 
 The C embedding ABI (v1) exposes logical put/get/delete plus raw engine
-operations (`kvlite_raw_put/get/delete`) and snapshot prefix scans
+operations (`kvlite_raw_put/get/delete`), atomic ordered batches
+(`kvlite_raw_apply`), and snapshot prefix scans
 (`kvlite_raw_scan_open/next/close`) as additive v1 symbols. A standalone
 protocol process opens its driver's installed C-shared module through the
 runtime driver loader and speaks the engine keyspace directly, so HTTP
@@ -269,7 +270,10 @@ A driver can also load in-process through the frozen native-module ABI
 (`capi/kvlite_module.h`, v1). The shared library exports one entry point,
 `kvlite_module_init_v1`, receives a host-services table, and registers driver
 operation tables over the same engine keyspace as the raw C ABI. The host
-never unloads an initialized module and verifies its checksum before loading,
+also requires the companion `kvlite_module_apply_v1` atomic-batch symbol and
+all scan operations. Older modules missing these are rejected at load time;
+the v1 operation table itself is unchanged. The host never unloads an
+initialized module and verifies its checksum before loading,
 like every other artifact kind. Any language that produces a C shared library
 can implement one; `capi/testdata/nativememdb/memdb.c` is a dependency-free C
 reference used by the loader tests. A driver module manifest for this kind

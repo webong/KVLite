@@ -1,23 +1,19 @@
 package kvlite
 
-import (
-	"context"
-	"errors"
-)
+import "context"
 
-// deleteLogicalKey removes every record that can make up one logical KVLite
-// key. Scalar writes use it before storing their replacement so a protocol
-// extension cannot leave a conflicting collection representation behind.
+// logicalKeyMutations collects removals for every record that can make up one
+// logical KVLite key. Callers apply them with any replacement in one batch.
 //
 // It deliberately uses exact lookups for scalar, list, and collection-TTL
 // records: prefix matching those forms would also match sibling keys such as
 // "user:10" while deleting "user:1".
-func (db *DB) deleteLogicalKey(ctx context.Context, key string) (bool, error) {
+func (db *DB) logicalKeyMutations(ctx context.Context, key string) ([]Mutation, error) {
 	keys := make([][]byte, 0, 4)
 	for _, storageKey := range [][]byte{valueKey(key), listKey(key), collectionTTLKey(key)} {
 		_, found, err := db.engine.Get(ctx, storageKey)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if found {
 			keys = append(keys, storageKey)
@@ -28,16 +24,23 @@ func (db *DB) deleteLogicalKey(ctx context.Context, key string) (bool, error) {
 			keys = append(keys, append([]byte(nil), storageKey...))
 			return nil
 		}); err != nil {
-			if errors.Is(err, ErrDriverUnavailable) {
-				continue
-			}
-			return false, err
+			return nil, err
 		}
 	}
+	mutations := make([]Mutation, 0, len(keys))
 	for _, storageKey := range keys {
-		if err := db.engine.Delete(ctx, storageKey); err != nil {
-			return false, err
-		}
+		mutations = append(mutations, Mutation{Key: storageKey, Delete: true})
 	}
-	return len(keys) > 0, nil
+	return mutations, nil
+}
+
+func (db *DB) deleteLogicalKey(ctx context.Context, key string) (bool, error) {
+	mutations, err := db.logicalKeyMutations(ctx, key)
+	if err != nil || len(mutations) == 0 {
+		return false, err
+	}
+	if err := db.engine.Apply(ctx, mutations); err != nil {
+		return false, err
+	}
+	return true, nil
 }

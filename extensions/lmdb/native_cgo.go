@@ -111,6 +111,37 @@ func (e *engine) Delete(ctx context.Context, key []byte) error {
 	return err
 }
 
+func (e *engine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	err := e.env.Update(func(txn *native.Txn) error {
+		for _, mutation := range mutations {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if len(mutation.Key) == 0 {
+				return kvlite.ErrInvalidArgument
+			}
+			if err := e.validateKey(mutation.Key); err != nil {
+				return err
+			}
+			if mutation.Delete {
+				if err := txn.Del(e.dbi, mutation.Key, nil); err != nil && !native.IsNotFound(err) {
+					return err
+				}
+			} else if err := txn.Put(e.dbi, mutation.Key, mutation.Value, 0); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if native.IsMapFull(err) {
+		return fmt.Errorf("kvlite: LMDB map is full (16 GiB virtual limit): %w", err)
+	}
+	return err
+}
+
 func (e *engine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err

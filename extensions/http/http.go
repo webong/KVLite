@@ -346,13 +346,21 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 				http.Error(w, "invalid or oversized body", http.StatusRequestEntityTooLarge)
 				return
 			}
-			if err := database.Transport().Put(request.Context(), key, value); err != nil {
+			store := database.Protocol()
+			store.Lock()
+			err = store.Put(request.Context(), key, value)
+			store.Unlock()
+			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodDelete:
-			if err := database.Transport().Delete(request.Context(), key); err != nil {
+			store := database.Protocol()
+			store.Lock()
+			err := store.Delete(request.Context(), key)
+			store.Unlock()
+			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -361,6 +369,37 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 			w.Header().Set("Allow", "GET, PUT, DELETE")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+	mux.HandleFunc("POST /v1/batch", func(w http.ResponseWriter, request *http.Request) {
+		database, ok := resolveSharedDatabase(databases, w, request)
+		if !ok {
+			return
+		}
+		request.Body = http.MaxBytesReader(w, request.Body, options.MaxRequestBytes)
+		var mutations []kvlite.Mutation
+		decoder := json.NewDecoder(request.Body)
+		if err := decoder.Decode(&mutations); err != nil {
+			http.Error(w, "invalid or oversized mutation batch", http.StatusBadRequest)
+			return
+		}
+		var extra any
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "mutation batch has trailing data", http.StatusBadRequest)
+			return
+		}
+		store := database.Protocol()
+		store.Lock()
+		err := store.Apply(request.Context(), mutations)
+		store.Unlock()
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, kvlite.ErrInvalidArgument) {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("PUT /v1/logical/{key}", func(w http.ResponseWriter, request *http.Request) {
 		database, ok := resolveSharedDatabase(databases, w, request)
@@ -385,11 +424,7 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 		}
 		store.Lock()
 		defer store.Unlock()
-		if _, err := store.DeleteLogicalKey(request.Context(), string(key)); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := store.Put(request.Context(), store.ValueKey(string(key)), encoded); err != nil {
+		if err := store.ReplaceLogicalValue(request.Context(), string(key), encoded); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -810,6 +845,22 @@ func (engine *remoteEngine) Delete(ctx context.Context, key []byte) error {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		return remoteStatusError(response)
+	}
+	return nil
+}
+
+func (engine *remoteEngine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	payload, err := json.Marshal(mutations)
+	if err != nil {
+		return err
+	}
+	response, err := engine.request(ctx, http.MethodPost, "/v1/batch", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return remoteMutationError(response, "batch")
 	}
 	return nil
 }

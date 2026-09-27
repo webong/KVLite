@@ -95,6 +95,23 @@ int kvlite_raw_delete(unsigned long long handle,
                       const void *key, size_t key_length,
                       char **out_error);
 
+/* An ordered, all-or-nothing change to the raw KVLite record keyspace.
+ * A commit-time I/O error may leave the outcome unknown; inspect before retry.
+ */
+typedef struct {
+    const void *key;
+    size_t key_length;
+    const void *value;
+    size_t value_length;
+    int is_delete;
+} kvlite_mutation;
+
+/* Additive ABI v1 symbol. Older bundles without it cannot provide an atomic
+ * engine adapter to a host that requires multi-record writes. */
+int kvlite_raw_apply(unsigned long long handle,
+                     const kvlite_mutation *mutations, size_t count,
+                     char **out_error);
+
 /*
  * Open a prefix scan over the engine keyspace. The snapshot is collected when
  * the scan opens; later writes are not visible through an open cursor. The

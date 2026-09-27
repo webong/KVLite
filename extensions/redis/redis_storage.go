@@ -215,20 +215,15 @@ func (db *database) redisString(ctx context.Context, key string) ([]byte, bool, 
 }
 
 func (db *database) redisWriteString(ctx context.Context, key string, value []byte, expiresAt int64) error {
-	if expiresAt <= 0 {
-		if err := db.putPayload(ctx, db.store.ValueKey(key), bytesCodec, value, 0); err != nil {
-			return err
-		}
-		// Strings keep expiry in their envelope; collection metadata must not
-		// linger when a key changes type or is recreated.
-		return db.engine.Delete(ctx, db.store.CollectionTTLKey(key))
-	}
-	duration := time.Unix(0, expiresAt).Sub(db.cfg.now())
-	if duration <= 0 {
+	if expiresAt > 0 && expiresAt <= db.cfg.now().UnixNano() {
 		_, err := db.redisDeleteRaw(ctx, key)
 		return err
 	}
-	return db.putPayload(ctx, db.store.ValueKey(key), bytesCodec, value, duration)
+	encoded, err := db.encodeRecord(bytesCodec, value, expiresAt)
+	if err != nil {
+		return err
+	}
+	return db.store.ReplaceLogicalValue(ctx, key, encoded)
 }
 
 func (db *database) redisExpiry(ctx context.Context, key string) (int64, bool, error) {
@@ -284,18 +279,15 @@ func (db *database) redisSetExpiry(ctx context.Context, key string, expiresAt in
 }
 
 func (db *database) redisWriteStringWithCodec(ctx context.Context, key string, payload []byte, codec string, expiresAt int64) error {
-	if expiresAt <= 0 {
-		if err := db.putPayload(ctx, db.store.ValueKey(key), codec, payload, 0); err != nil {
-			return err
-		}
-		return db.engine.Delete(ctx, db.store.CollectionTTLKey(key))
-	}
-	duration := time.Unix(0, expiresAt).Sub(db.cfg.now())
-	if duration <= 0 {
+	if expiresAt > 0 && expiresAt <= db.cfg.now().UnixNano() {
 		_, err := db.redisDeleteRaw(ctx, key)
 		return err
 	}
-	return db.putPayload(ctx, db.store.ValueKey(key), codec, payload, duration)
+	encoded, err := db.encodeRecord(codec, payload, expiresAt)
+	if err != nil {
+		return err
+	}
+	return db.store.ReplaceLogicalValue(ctx, key, encoded)
 }
 
 func (db *database) redisPersist(ctx context.Context, key string) (bool, error) {

@@ -190,9 +190,6 @@ func (db *database) redisSet(args [][]byte) respValue {
 }
 
 func (db *database) redisDeleteAndWriteString(key string, value []byte, expiresAt int64) error {
-	if _, err := db.redisDeleteRaw(context.Background(), key); err != nil {
-		return err
-	}
 	return db.redisWriteString(context.Background(), key, value, expiresAt)
 }
 
@@ -234,9 +231,6 @@ func (db *database) redisSetEX(args [][]byte, milliseconds bool) respValue {
 		return redisErrorReply(errors.New("invalid expire time in set"))
 	}
 	key := string(args[1])
-	if _, err := db.redisDeleteRaw(context.Background(), key); err != nil {
-		return redisErrorReply(err)
-	}
 	if err := db.redisWriteString(context.Background(), key, args[3], now+delta); err != nil {
 		return redisErrorReply(err)
 	}
@@ -250,9 +244,6 @@ func (db *database) redisGetSet(args [][]byte) respValue {
 	key := string(args[1])
 	old, found, err := db.redisString(context.Background(), key)
 	if err != nil {
-		return redisErrorReply(err)
-	}
-	if _, err := db.redisDeleteRaw(context.Background(), key); err != nil {
 		return redisErrorReply(err)
 	}
 	if err := db.redisWriteString(context.Background(), key, args[2], 0); err != nil {
@@ -356,9 +347,6 @@ func (db *database) redisMSet(args [][]byte) respValue {
 	}
 	for index := 1; index < len(args); index += 2 {
 		key := string(args[index])
-		if _, err := db.redisDeleteRaw(context.Background(), key); err != nil {
-			return redisErrorReply(err)
-		}
 		if err := db.redisWriteString(context.Background(), key, args[index+1], 0); err != nil {
 			return redisErrorReply(err)
 		}
@@ -689,24 +677,33 @@ func (db *database) redisHSet(args [][]byte) respValue {
 	if typ != redisTypeNone && typ != redisTypeHash {
 		return redisErrorReply(fmt.Errorf("%w: %s", errRedisWrongType, typ))
 	}
+	mutations := make([]kvlite.Mutation, 0, (len(args)-2)/2+1)
 	if typ == redisTypeNone {
-		// A stale expiry record should not apply to a newly-created hash.
-		_ = db.engine.Delete(context.Background(), db.store.CollectionTTLKey(key))
+		mutations = append(mutations, kvlite.Mutation{Key: db.store.CollectionTTLKey(key), Delete: true})
 	}
 	var added int64
+	seen := make(map[string]bool)
 	for index := 2; index < len(args); index += 2 {
 		field := string(args[index])
 		storageKey := db.store.HashKey(key, field)
-		_, found, err := db.engine.Get(context.Background(), storageKey)
+		if !seen[field] {
+			_, found, err := db.engine.Get(context.Background(), storageKey)
+			if err != nil {
+				return redisErrorReply(err)
+			}
+			if !found {
+				added++
+			}
+			seen[field] = true
+		}
+		encoded, err := db.encodeRecord(bytesCodec, args[index+1], 0)
 		if err != nil {
 			return redisErrorReply(err)
 		}
-		if !found {
-			added++
-		}
-		if err := db.putPayload(context.Background(), storageKey, bytesCodec, args[index+1], 0); err != nil {
-			return redisErrorReply(err)
-		}
+		mutations = append(mutations, kvlite.Mutation{Key: storageKey, Value: encoded})
+	}
+	if err := db.engine.Apply(context.Background(), mutations); err != nil {
+		return redisErrorReply(err)
 	}
 	return respIntegerValue(added)
 }
@@ -775,7 +772,13 @@ func (db *database) redisHDel(args [][]byte) respValue {
 		return redisErrorReply(fmt.Errorf("%w: %s", errRedisWrongType, typ))
 	}
 	var removed int64
+	mutations := make([]kvlite.Mutation, 0, len(args)-2)
+	seen := make(map[string]bool)
 	for _, field := range args[2:] {
+		if seen[string(field)] {
+			continue
+		}
+		seen[string(field)] = true
 		storageKey := db.store.HashKey(key, string(field))
 		data, found, err := db.engine.Get(context.Background(), storageKey)
 		if err != nil {
@@ -789,13 +792,14 @@ func (db *database) redisHDel(args [][]byte) respValue {
 			return redisErrorReply(decodeErr)
 		}
 		if value.expiresAt > 0 && db.cfg.now().UnixNano() >= value.expiresAt {
-			_ = db.engine.Delete(context.Background(), storageKey)
+			mutations = append(mutations, kvlite.Mutation{Key: storageKey, Delete: true})
 			continue
 		}
-		if err := db.engine.Delete(context.Background(), storageKey); err != nil {
-			return redisErrorReply(err)
-		}
+		mutations = append(mutations, kvlite.Mutation{Key: storageKey, Delete: true})
 		removed++
+	}
+	if err := db.engine.Apply(context.Background(), mutations); err != nil {
+		return redisErrorReply(err)
 	}
 	if entries, _, err := db.redisHashEntries(context.Background(), key); err != nil {
 		return redisErrorReply(err)
@@ -935,11 +939,17 @@ func (db *database) redisSAdd(args [][]byte) respValue {
 	if typ != redisTypeNone && typ != redisTypeSet {
 		return redisErrorReply(fmt.Errorf("%w: %s", errRedisWrongType, typ))
 	}
+	mutations := make([]kvlite.Mutation, 0, len(args)-1)
 	if typ == redisTypeNone {
-		_ = db.engine.Delete(context.Background(), db.store.CollectionTTLKey(key))
+		mutations = append(mutations, kvlite.Mutation{Key: db.store.CollectionTTLKey(key), Delete: true})
 	}
 	var added int64
+	seen := make(map[string]bool)
 	for _, member := range args[2:] {
+		if seen[string(member)] {
+			continue
+		}
+		seen[string(member)] = true
 		storageKey := db.store.SetKey(key, string(member))
 		_, found, err := db.engine.Get(context.Background(), storageKey)
 		if err != nil {
@@ -948,10 +958,11 @@ func (db *database) redisSAdd(args [][]byte) respValue {
 		if found {
 			continue
 		}
-		if err := db.engine.Put(context.Background(), storageKey, []byte{1}); err != nil {
-			return redisErrorReply(err)
-		}
+		mutations = append(mutations, kvlite.Mutation{Key: storageKey, Value: []byte{1}})
 		added++
+	}
+	if err := db.engine.Apply(context.Background(), mutations); err != nil {
+		return redisErrorReply(err)
 	}
 	return respIntegerValue(added)
 }
@@ -972,7 +983,13 @@ func (db *database) redisSRem(args [][]byte) respValue {
 		return redisErrorReply(fmt.Errorf("%w: %s", errRedisWrongType, typ))
 	}
 	var removed int64
+	mutations := make([]kvlite.Mutation, 0, len(args)-2)
+	seen := make(map[string]bool)
 	for _, member := range args[2:] {
+		if seen[string(member)] {
+			continue
+		}
+		seen[string(member)] = true
 		storageKey := db.store.SetKey(key, string(member))
 		_, found, err := db.engine.Get(context.Background(), storageKey)
 		if err != nil {
@@ -981,10 +998,11 @@ func (db *database) redisSRem(args [][]byte) respValue {
 		if !found {
 			continue
 		}
-		if err := db.engine.Delete(context.Background(), storageKey); err != nil {
-			return redisErrorReply(err)
-		}
+		mutations = append(mutations, kvlite.Mutation{Key: storageKey, Delete: true})
 		removed++
+	}
+	if err := db.engine.Apply(context.Background(), mutations); err != nil {
+		return redisErrorReply(err)
 	}
 	if members, _, err := db.redisSetMembers(context.Background(), key); err != nil {
 		return redisErrorReply(err)
@@ -1442,10 +1460,12 @@ func (db *database) redisFlush(args [][]byte) respValue {
 	}); err != nil {
 		return redisErrorReply(err)
 	}
+	mutations := make([]kvlite.Mutation, 0, len(storageKeys))
 	for _, storageKey := range storageKeys {
-		if err := db.engine.Delete(context.Background(), storageKey); err != nil {
-			return redisErrorReply(err)
-		}
+		mutations = append(mutations, kvlite.Mutation{Key: storageKey, Delete: true})
+	}
+	if err := db.engine.Apply(context.Background(), mutations); err != nil {
+		return redisErrorReply(err)
 	}
 	return respSimpleString("OK")
 }

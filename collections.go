@@ -38,19 +38,26 @@ func (db *DB) HDelete(ctx context.Context, name string, fields ...string) (int, 
 	db.protocolMu.Lock()
 	defer db.protocolMu.Unlock()
 	deleted := 0
+	mutations := make([]Mutation, 0, len(fields))
+	seen := make(map[string]bool, len(fields))
 	for _, field := range fields {
+		if seen[field] {
+			continue
+		}
+		seen[field] = true
 		key := namespacedKey(kindHash, name, field)
 		_, found, err := db.engine.Get(ctx, key)
 		if err != nil {
-			return deleted, err
+			return 0, err
 		}
 		if !found {
 			continue
 		}
-		if err := db.engine.Delete(ctx, key); err != nil {
-			return deleted, err
-		}
+		mutations = append(mutations, Mutation{Key: key, Delete: true})
 		deleted++
+	}
+	if err := db.engine.Apply(ctx, mutations); err != nil {
+		return 0, err
 	}
 	return deleted, nil
 }
@@ -107,19 +114,26 @@ func (db *DB) SAdd(ctx context.Context, name string, members ...string) (int, er
 	db.protocolMu.Lock()
 	defer db.protocolMu.Unlock()
 	added := 0
+	mutations := make([]Mutation, 0, len(members))
+	seen := make(map[string]bool, len(members))
 	for _, member := range members {
+		if seen[member] {
+			continue
+		}
+		seen[member] = true
 		key := namespacedKey(kindSet, name, member)
 		_, found, err := db.engine.Get(ctx, key)
 		if err != nil {
-			return added, err
+			return 0, err
 		}
 		if found {
 			continue
 		}
-		if err := db.engine.Put(ctx, key, []byte{1}); err != nil {
-			return added, err
-		}
+		mutations = append(mutations, Mutation{Key: key, Value: []byte{1}})
 		added++
+	}
+	if err := db.engine.Apply(ctx, mutations); err != nil {
+		return 0, err
 	}
 	return added, nil
 }
@@ -140,19 +154,26 @@ func (db *DB) SRemove(ctx context.Context, name string, members ...string) (int,
 	db.protocolMu.Lock()
 	defer db.protocolMu.Unlock()
 	removed := 0
+	mutations := make([]Mutation, 0, len(members))
+	seen := make(map[string]bool, len(members))
 	for _, member := range members {
+		if seen[member] {
+			continue
+		}
+		seen[member] = true
 		key := namespacedKey(kindSet, name, member)
 		_, found, err := db.engine.Get(ctx, key)
 		if err != nil {
-			return removed, err
+			return 0, err
 		}
 		if !found {
 			continue
 		}
-		if err := db.engine.Delete(ctx, key); err != nil {
-			return removed, err
-		}
+		mutations = append(mutations, Mutation{Key: key, Delete: true})
 		removed++
+	}
+	if err := db.engine.Apply(ctx, mutations); err != nil {
+		return 0, err
 	}
 	return removed, nil
 }

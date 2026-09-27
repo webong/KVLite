@@ -10,8 +10,13 @@ import (
 	"testing"
 
 	"github.com/webong/kvlite"
+	"github.com/webong/kvlite/enginetest"
 	"github.com/webong/kvlite/extensions/boltdb"
 )
+
+func TestAtomicMutations(t *testing.T) {
+	enginetest.RunAtomicMutations(t, kvlite.DriverBoltDB)
+}
 
 func TestDriverPersistsCollectionsAndRecords(t *testing.T) {
 	path := t.TempDir()

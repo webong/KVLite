@@ -15,6 +15,13 @@ package kvlite
 #endif
 
 typedef unsigned long long kvlite_handle_t;
+typedef struct {
+	const void *key;
+	size_t key_length;
+	const void *value;
+	size_t value_length;
+	int is_delete;
+} kvlite_mutation;
 
 typedef int (*kvlite_abi_version_fn)(void);
 typedef int (*kvlite_open_with_driver_fn)(const char *, const char *, kvlite_handle_t *, char **);
@@ -29,6 +36,7 @@ typedef void (*kvlite_free_fn)(void *);
 typedef int (*kvlite_raw_put_fn)(kvlite_handle_t, const void *, size_t, const void *, size_t, char **);
 typedef int (*kvlite_raw_get_fn)(kvlite_handle_t, const void *, size_t, void **, size_t *, char **);
 typedef int (*kvlite_raw_delete_fn)(kvlite_handle_t, const void *, size_t, char **);
+typedef int (*kvlite_raw_apply_fn)(kvlite_handle_t, const kvlite_mutation *, size_t, char **);
 typedef int (*kvlite_raw_scan_open_fn)(kvlite_handle_t, const void *, size_t, kvlite_handle_t *, char **);
 typedef int (*kvlite_raw_scan_next_fn)(kvlite_handle_t, void **, size_t *, void **, size_t *, char **);
 typedef int (*kvlite_raw_scan_close_fn)(kvlite_handle_t, char **);
@@ -44,6 +52,7 @@ typedef struct {
 	kvlite_raw_put_fn raw_put;
 	kvlite_raw_get_fn raw_get;
 	kvlite_raw_delete_fn raw_delete;
+	kvlite_raw_apply_fn raw_apply;
 	kvlite_raw_scan_open_fn raw_scan_open;
 	kvlite_raw_scan_next_fn raw_scan_next;
 	kvlite_raw_scan_close_fn raw_scan_close;
@@ -139,6 +148,7 @@ static int kvlite_module_load(const char *path, kvlite_module_api *api, char **o
 	RESOLVE(raw_put, "kvlite_raw_put", kvlite_raw_put_fn);
 	RESOLVE(raw_get, "kvlite_raw_get", kvlite_raw_get_fn);
 	RESOLVE(raw_delete, "kvlite_raw_delete", kvlite_raw_delete_fn);
+	RESOLVE(raw_apply, "kvlite_raw_apply", kvlite_raw_apply_fn);
 	RESOLVE(raw_scan_open, "kvlite_raw_scan_open", kvlite_raw_scan_open_fn);
 	RESOLVE(raw_scan_next, "kvlite_raw_scan_next", kvlite_raw_scan_next_fn);
 	RESOLVE(raw_scan_close, "kvlite_raw_scan_close", kvlite_raw_scan_close_fn);
@@ -214,6 +224,13 @@ static int kvlite_module_raw_delete(const kvlite_module_api *api, kvlite_handle_
 		return 1;
 	}
 	return api->raw_delete(handle, key, key_length, out_error);
+}
+
+static int kvlite_module_raw_apply(const kvlite_module_api *api, kvlite_handle_t handle, const kvlite_mutation *mutations, size_t count, char **out_error) {
+	if (api == NULL || api->raw_apply == NULL) {
+		return 1;
+	}
+	return api->raw_apply(handle, mutations, count, out_error);
 }
 
 static int kvlite_module_raw_scan_open(const kvlite_module_api *api, kvlite_handle_t handle, const void *prefix, size_t prefix_length, kvlite_handle_t *out_cursor, char **out_error) {
@@ -412,6 +429,47 @@ func (library *moduleLibrary) delete(handle uint64, key []byte) error {
 	return nativeModuleStatusError(status, readCStringAndFree(cError), "delete")
 }
 
+func (library *moduleLibrary) apply(handle uint64, mutations []Mutation) error {
+	count := len(mutations)
+	var changes *C.kvlite_mutation
+	if count > 0 {
+		changes = (*C.kvlite_mutation)(C.calloc(C.size_t(count), C.size_t(C.sizeof_kvlite_mutation)))
+		if changes == nil {
+			return fmt.Errorf("kvlite: allocate mutation batch: out of memory")
+		}
+		defer C.free(unsafe.Pointer(changes))
+	}
+	items := unsafe.Slice(changes, count)
+	defer func() {
+		for _, item := range items {
+			C.free(unsafe.Pointer(item.key))
+			C.free(unsafe.Pointer(item.value))
+		}
+	}()
+	for index, mutation := range mutations {
+		if len(mutation.Key) > 0 {
+			items[index].key = C.CBytes(mutation.Key)
+			if items[index].key == nil {
+				return fmt.Errorf("kvlite: allocate mutation key: out of memory")
+			}
+		}
+		items[index].key_length = C.size_t(len(mutation.Key))
+		if len(mutation.Value) > 0 {
+			items[index].value = C.CBytes(mutation.Value)
+			if items[index].value == nil {
+				return fmt.Errorf("kvlite: allocate mutation value: out of memory")
+			}
+		}
+		items[index].value_length = C.size_t(len(mutation.Value))
+		if mutation.Delete {
+			items[index].is_delete = 1
+		}
+	}
+	cError := (*C.char)(nil)
+	status := C.kvlite_module_raw_apply(library.state, C.ulonglong(handle), changes, C.size_t(count), &cError)
+	return nativeModuleStatusError(status, readCStringAndFree(cError), "apply")
+}
+
 // scanPrefix streams one engine-keyspace prefix scan through a snapshot
 // cursor. The cursor is always closed before returning.
 func (library *moduleLibrary) scanPrefix(handle uint64, prefix []byte) ([][]byte, [][]byte, error) {
@@ -496,6 +554,16 @@ func (engine *moduleDriverEngine) Delete(_ context.Context, key []byte) error {
 		return ErrClosed
 	}
 	return engine.library.delete(engine.handle, key)
+}
+
+func (engine *moduleDriverEngine) Apply(ctx context.Context, mutations []Mutation) error {
+	if engine.closed {
+		return ErrClosed
+	}
+	if err := validateMutations(ctx, mutations); err != nil {
+		return err
+	}
+	return engine.library.apply(engine.handle, mutations)
 }
 
 func (engine *moduleDriverEngine) ScanPrefix(_ context.Context, prefix []byte, callback func(key, value []byte) error) error {

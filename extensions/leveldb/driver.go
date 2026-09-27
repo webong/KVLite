@@ -99,6 +99,24 @@ func (engine *engine) Delete(ctx context.Context, key []byte) error {
 	return engine.db.Delete(key, nil)
 }
 
+func (engine *engine) Apply(ctx context.Context, mutations []kvlite.Mutation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	batch := new(leveldb.Batch)
+	for _, mutation := range mutations {
+		if len(mutation.Key) == 0 {
+			return kvlite.ErrInvalidArgument
+		}
+		if mutation.Delete {
+			batch.Delete(mutation.Key)
+		} else {
+			batch.Put(mutation.Key, mutation.Value)
+		}
+	}
+	return engine.db.Write(batch, nil)
+}
+
 func (engine *engine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err

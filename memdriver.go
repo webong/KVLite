@@ -98,6 +98,25 @@ func (engine *memoryDriverEngine) Delete(ctx context.Context, key []byte) error 
 	return nil
 }
 
+func (engine *memoryDriverEngine) Apply(ctx context.Context, mutations []Mutation) error {
+	if err := validateMutations(ctx, mutations); err != nil {
+		return err
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if engine.closed {
+		return ErrClosed
+	}
+	for _, mutation := range mutations {
+		if mutation.Delete {
+			delete(engine.data, string(mutation.Key))
+		} else {
+			engine.data[string(mutation.Key)] = append([]byte(nil), mutation.Value...)
+		}
+	}
+	return nil
+}
+
 func (engine *memoryDriverEngine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	engine.mu.RLock()
 	if engine.closed {

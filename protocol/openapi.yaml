@@ -52,6 +52,32 @@ paths:
           $ref: '#/components/responses/DriverUnavailable'
         '501':
           $ref: '#/components/responses/DriverUnavailable'
+  /v1/batch:
+    post:
+      summary: Apply an ordered atomic batch of raw KVLite record mutations
+      description: |
+        Low-level route for trusted KVLite clients and installed transports.
+        Keys address the internal KVLite record keyspace, not user-facing
+        logical keys. The selected engine commits the whole batch or none.
+      parameters:
+        - $ref: '#/components/parameters/Driver'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/Mutation'
+      responses:
+        '204':
+          description: Batch committed
+        '400':
+          description: Invalid or oversized batch
+        '409':
+          $ref: '#/components/responses/DriverUnavailable'
+        '501':
+          $ref: '#/components/responses/DriverUnavailable'
   /v1/entries/{key}:
     parameters:
       - $ref: '#/components/parameters/Key'
@@ -145,6 +171,21 @@ components:
           schema:
             $ref: '#/components/schemas/DriverError'
   schemas:
+    Mutation:
+      type: object
+      required: [key]
+      properties:
+        key:
+          type: string
+          contentEncoding: base64
+          description: Standard base64 encoding of a non-empty raw record key.
+        value:
+          type: string
+          contentEncoding: base64
+          description: Standard base64 encoding of the raw record value; omitted for deletion.
+        delete:
+          type: boolean
+          default: false
     Discovery:
       type: object
       required: [protocol, entries, methods, driver, backend, drivers]

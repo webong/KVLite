@@ -228,12 +228,15 @@ func (db *DB) replaceLogicalValue(ctx context.Context, key string, encoded []byt
 			return err
 		}
 	}
-	// A logical key has one representation. Remove any collection records
-	// before writing its scalar replacement.
-	if _, err := db.deleteLogicalKey(ctx, key); err != nil {
+	// A logical key has one representation. Commit removal of old collection
+	// records and the new scalar together, so a rejected batch cannot leave
+	// a partially replaced representation.
+	mutations, err := db.logicalKeyMutations(ctx, key)
+	if err != nil {
 		return fmt.Errorf("kvlite: put: %w", err)
 	}
-	if err := db.engine.Put(ctx, valueKey(key), encoded); err != nil {
+	mutations = append(mutations, Mutation{Key: valueKey(key), Value: encoded})
+	if err := db.engine.Apply(ctx, mutations); err != nil {
 		return fmt.Errorf("kvlite: put: %w", err)
 	}
 	return nil

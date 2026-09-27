@@ -11,8 +11,13 @@ import (
 	"testing"
 
 	"github.com/webong/kvlite"
+	"github.com/webong/kvlite/enginetest"
 	"github.com/webong/kvlite/extensions/berkeleydb"
 )
+
+func TestAtomicMutations(t *testing.T) {
+	enginetest.RunAtomicMutations(t, kvlite.DriverBerkeleyDB)
+}
 
 func TestBerkeleyDBDriverOpensPersistsAndScansKVLiteRecords(t *testing.T) {
 	if got := kvlite.DefaultDriver(); got != kvlite.DriverBerkeleyDB {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,6 +107,21 @@ func TestRuntimeModuleDriverRawRecordStore(t *testing.T) {
 	}
 	if _, found, err := store.Get(ctx, []byte("raw:a/1")); err != nil || found {
 		t.Fatalf("Get() after Delete() = %t, %v; want false, nil", found, err)
+	}
+	if err := store.Apply(ctx, []Mutation{
+		{Key: []byte("raw:a/2"), Delete: true},
+		{Key: []byte("raw:c/1"), Value: []byte("four")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Apply(ctx, []Mutation{
+		{Key: []byte("raw:c/1"), Value: []byte("changed")},
+		{Key: nil, Value: []byte("invalid")},
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid runtime module batch error = %v", err)
+	}
+	if value, found, err := store.Get(ctx, []byte("raw:c/1")); err != nil || !found || string(value) != "four" {
+		t.Fatalf("runtime module batch result = %q, %t, %v", value, found, err)
 	}
 }
 

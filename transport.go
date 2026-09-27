@@ -16,6 +16,7 @@ type TransportStore interface {
 	Get(context.Context, []byte) ([]byte, bool, error)
 	Put(context.Context, []byte, []byte) error
 	Delete(context.Context, []byte) error
+	Apply(context.Context, []Mutation) error
 	ScanPrefix(context.Context, []byte, func(key, value []byte) error) error
 	PushList(context.Context, []byte, [][]byte, bool) (int, error)
 }
@@ -40,6 +41,7 @@ type ProtocolStore interface {
 	Unlock()
 	Now() time.Time
 	DeleteLogicalKey(context.Context, string) (bool, error)
+	ReplaceLogicalValue(context.Context, string, []byte) error
 	ValueKey(string) []byte
 	HashKey(name, field string) []byte
 	HashPrefix(name string) []byte
@@ -86,6 +88,13 @@ func (transport dbTransport) Delete(ctx context.Context, key []byte) error {
 	return transport.db.engine.Delete(ctx, key)
 }
 
+func (transport dbTransport) Apply(ctx context.Context, mutations []Mutation) error {
+	if err := transport.db.ensureOpen(); err != nil {
+		return err
+	}
+	return transport.db.engine.Apply(ctx, mutations)
+}
+
 func (transport dbTransport) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	if err := transport.db.ensureOpen(); err != nil {
 		return err
@@ -116,6 +125,10 @@ func (store dbProtocol) Delete(ctx context.Context, key []byte) error {
 	return dbTransport{db: store.db}.Delete(ctx, key)
 }
 
+func (store dbProtocol) Apply(ctx context.Context, mutations []Mutation) error {
+	return dbTransport{db: store.db}.Apply(ctx, mutations)
+}
+
 func (store dbProtocol) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {
 	return dbTransport{db: store.db}.ScanPrefix(ctx, prefix, callback)
 }
@@ -141,6 +154,13 @@ func (store dbProtocol) DeleteLogicalKey(ctx context.Context, key string) (bool,
 		return false, err
 	}
 	return store.db.deleteLogicalKey(ctx, key)
+}
+
+func (store dbProtocol) ReplaceLogicalValue(ctx context.Context, key string, encoded []byte) error {
+	if err := store.db.ensureOpen(); err != nil {
+		return err
+	}
+	return store.db.replaceLogicalValue(ctx, key, encoded)
 }
 
 func (store dbProtocol) ValueKey(key string) []byte {

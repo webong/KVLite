@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -11,9 +12,10 @@ import (
 )
 
 type memoryEngine struct {
-	mu     sync.RWMutex
-	data   map[string][]byte
-	closed bool
+	mu         sync.RWMutex
+	data       map[string][]byte
+	closed     bool
+	applyError error
 }
 
 func newMemoryEngine() *memoryEngine {
@@ -48,6 +50,47 @@ func (engine *memoryEngine) Delete(ctx context.Context, key []byte) error {
 	defer engine.mu.Unlock()
 	delete(engine.data, string(key))
 	return nil
+}
+
+func (engine *memoryEngine) Apply(ctx context.Context, mutations []Mutation) error {
+	if err := validateMutations(ctx, mutations); err != nil {
+		return err
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if engine.applyError != nil {
+		return engine.applyError
+	}
+	for _, mutation := range mutations {
+		if mutation.Delete {
+			delete(engine.data, string(mutation.Key))
+		} else {
+			engine.data[string(mutation.Key)] = append([]byte(nil), mutation.Value...)
+		}
+	}
+	return nil
+}
+
+func TestFailedLogicalReplacementKeepsOldCollection(t *testing.T) {
+	db, storage := testDB(t)
+	ctx := context.Background()
+	if _, err := db.SAdd(ctx, "shared", "first", "second"); err != nil {
+		t.Fatal(err)
+	}
+	storage.mu.Lock()
+	storage.applyError = errors.New("injected batch failure")
+	storage.mu.Unlock()
+	if err := db.Put(ctx, "shared", "replacement"); err == nil {
+		t.Fatal("Put succeeded despite injected batch failure")
+	}
+	members, err := db.SMembers(ctx, "shared")
+	if err != nil || !slices.Equal(members, []string{"first", "second"}) {
+		t.Fatalf("old collection changed after failed replacement: %v, %v", members, err)
+	}
+	var value string
+	if err := db.Get(ctx, "shared", &value); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("new scalar exists after failed replacement: %q, %v", value, err)
+	}
 }
 
 func (engine *memoryEngine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {

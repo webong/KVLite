@@ -8,6 +8,13 @@ package main
 /*
 #include <stdint.h>
 #include <stdlib.h>
+typedef struct {
+    const void *key;
+    size_t key_length;
+    const void *value;
+    size_t value_length;
+    int is_delete;
+} kvlite_mutation;
 */
 import "C"
 
@@ -325,6 +332,31 @@ func kvlite_raw_delete(handle C.ulonglong, key unsafe.Pointer, keyLength C.size_
 		return statusFor(fmt.Errorf("%w: key is required", kvlite.ErrInvalidArgument), outError)
 	}
 	return statusFor(store.Delete(context.Background(), keyBytes), outError)
+}
+
+//export kvlite_raw_apply
+func kvlite_raw_apply(handle C.ulonglong, mutations *C.kvlite_mutation, count C.size_t, outError **C.char) C.int {
+	store, status := rawStore(handle, outError)
+	if store == nil {
+		return status
+	}
+	if uint64(count) > uint64(^uint(0)>>1) || (count > 0 && mutations == nil) {
+		return statusFor(fmt.Errorf("%w: invalid mutation batch", kvlite.ErrInvalidArgument), outError)
+	}
+	items := unsafe.Slice(mutations, int(count))
+	changes := make([]kvlite.Mutation, 0, len(items))
+	for _, item := range items {
+		key, err := inputBytes(unsafe.Pointer(item.key), item.key_length)
+		if err != nil {
+			return statusFor(err, outError)
+		}
+		value, err := inputBytes(unsafe.Pointer(item.value), item.value_length)
+		if err != nil {
+			return statusFor(err, outError)
+		}
+		changes = append(changes, kvlite.Mutation{Key: key, Value: value, Delete: item.is_delete != 0})
+	}
+	return statusFor(store.Apply(context.Background(), changes), outError)
 }
 
 //export kvlite_raw_scan_open

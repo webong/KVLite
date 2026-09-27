@@ -3,10 +3,16 @@
 KVLite is an engine-neutral, typed key-value core. Storage engines are optional
 engine extensions—not dependencies pulled into every application. Each engine
 extension contains a driver implementation. The core provides serialization,
-per-record TTLs, collections, metadata checks, and migrations; HTTP and Redis
+per-record TTLs, collections, and metadata checks; HTTP and Redis
 are transport extensions, while the C ABI is an embedded boundary. Go
 is the implementation language, not the required application language: other
 languages use an optional server extension or a driver-specific C bundle.
+
+KVLite owns the logical record model: namespaced keys, value envelopes,
+serialization, expiry, and collection behavior. Each engine extension stores
+those opaque records using its own physical format and must provide ordered
+prefix scans and atomic mutation batches. It remains responsible for its own
+indexing, journaling, compaction, and file layout.
 
 This repository is an MVP: the storage format is versioned and tested, while
 the public API is still free to evolve before a first stable release.
@@ -27,6 +33,8 @@ ultimately install prebuilt module artifacts rather than compile KVLite.
 - Per-key and per-hash-field TTLs with exact read-time expiry.
 - Hashes, string sets, and typed lists implemented with collision-safe key
   namespaces.
+- Ordered atomic mutation batches required of every engine driver, so a
+  rejected logical replacement cannot leave a half-deleted collection.
 - An optional authenticated HTTP owner/client extension where clients select a
   server-exposed driver name, never a filesystem path.
 - A RocksDB compaction filter that physically discards expired value envelopes;
@@ -279,6 +287,11 @@ Later opens must select the same target. This is one KVLite API, not one shared
 on-disk format: moving between engines requires a logical copy of records into
 a new KVLite path. A legacy KVLite RocksDB path without a manifest can be
 adopted by reopening it through the unchanged default `Open(path)` path.
+
+Logical export/import is planned, not implemented yet. Its future format will
+carry KVLite-level keys, collection types and members, codec identities, and
+expiry metadata—not physical RocksDB, LevelDB, or LMDB files. Import into
+another engine will create a new directory with that engine's manifest.
 
 ## Collections
 
