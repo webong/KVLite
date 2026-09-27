@@ -38,8 +38,7 @@ class LibraryFinder:
                 candidates.append(Path(candidate).expanduser())
 
         library_name = LibraryFinder._library_name()
-        if home := os.environ.get("KVLITE_HOME"):
-            home_path = Path(home).expanduser()
+        for home_path in LibraryFinder._catalog_roots():
             if driver:
                 candidates.append(home_path / "drivers" / driver / "lib" / library_name)
             if bundled := LibraryFinder._sole_driver_bundle(home_path, library_name):
@@ -81,6 +80,20 @@ class LibraryFinder:
         machine = platform.machine().lower()
         architecture = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
         return f"{system}-{architecture}"
+
+    @staticmethod
+    def _catalog_roots() -> list[Path]:
+        roots: list[Path] = []
+        if home := os.environ.get("KVLITE_HOME"):
+            roots.append(Path(home).expanduser())
+        roots.extend(Path(value).expanduser() for value in os.environ.get("KVLITE_SYSTEM_MODULE_PATH", "").split(os.pathsep) if value)
+        if platform.system() == "Windows":
+            for variable in ("LOCALAPPDATA", "ProgramFiles"):
+                if base := os.environ.get(variable):
+                    roots.append(Path(base) / "KVLite" / "lib" / "kvlite")
+        else:
+            roots.extend((Path.home() / ".local/lib/kvlite", Path("/usr/local/lib/kvlite"), Path("/usr/lib/kvlite")))
+        return list(dict.fromkeys(roots))
 
     @staticmethod
     def _sole_driver_bundle(home: Path, library_name: str) -> Path | None:

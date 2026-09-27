@@ -18,9 +18,7 @@ final class LibraryFinder
         }
 
         $libraryName = self::libraryName();
-        $home = getenv('KVLITE_HOME');
-        if (is_string($home) && $home !== '') {
-            $home = rtrim($home, DIRECTORY_SEPARATOR);
+        foreach (self::catalogRoots() as $home) {
             if ($driver !== null) {
                 $candidates[] = $home.DIRECTORY_SEPARATOR.'drivers'.DIRECTORY_SEPARATOR.$driver.DIRECTORY_SEPARATOR.'lib'.DIRECTORY_SEPARATOR.$libraryName;
             }
@@ -75,6 +73,41 @@ final class LibraryFinder
         ));
 
         return count($bundles) === 1 ? $bundles[0] : null;
+    }
+
+    /** @return list<string> */
+    private static function catalogRoots(): array
+    {
+        $roots = [];
+        $home = getenv('KVLITE_HOME');
+        if (is_string($home) && $home !== '') {
+            $roots[] = rtrim($home, DIRECTORY_SEPARATOR);
+        }
+        $system = getenv('KVLITE_SYSTEM_MODULE_PATH');
+        if (is_string($system) && $system !== '') {
+            foreach (explode(PATH_SEPARATOR, $system) as $root) {
+                if ($root !== '') {
+                    $roots[] = rtrim($root, DIRECTORY_SEPARATOR);
+                }
+            }
+        }
+        if (PHP_OS_FAMILY === 'Windows') {
+            foreach (['LOCALAPPDATA', 'ProgramFiles'] as $variable) {
+                $base = getenv($variable);
+                if (is_string($base) && $base !== '') {
+                    $roots[] = $base.'/KVLite/lib/kvlite';
+                }
+            }
+        } else {
+            $userHome = getenv('HOME');
+            if (is_string($userHome) && $userHome !== '') {
+                $roots[] = $userHome.'/.local/lib/kvlite';
+            }
+            $roots[] = '/usr/local/lib/kvlite';
+            $roots[] = '/usr/lib/kvlite';
+        }
+
+        return array_values(array_unique($roots));
     }
 
     private static function target(): string

@@ -13,12 +13,15 @@ import (
 	"time"
 
 	"github.com/webong/kvlite"
+	kvlitehttp "github.com/webong/kvlite/extensions/http"
 )
 
 type redisTestEngine struct {
-	mu         sync.RWMutex
-	values     map[string][]byte
-	applyError error
+	mu          sync.RWMutex
+	values      map[string][]byte
+	applyError  error
+	applyCount  int
+	failOnApply int
 }
 
 func newRedisTestEngine() *redisTestEngine {
@@ -66,7 +69,11 @@ func (engine *redisTestEngine) Apply(ctx context.Context, mutations []kvlite.Mut
 	}
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
-	if engine.applyError != nil {
+	engine.applyCount++
+	if engine.applyError != nil || (engine.failOnApply > 0 && engine.applyCount == engine.failOnApply) {
+		if engine.applyError == nil {
+			return errors.New("injected batch failure")
+		}
 		return engine.applyError
 	}
 	for _, mutation := range mutations {
@@ -77,6 +84,139 @@ func (engine *redisTestEngine) Apply(ctx context.Context, mutations []kvlite.Mut
 		}
 	}
 	return nil
+}
+
+func TestRedisMultiKeyWritesUseOneBatch(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		command []string
+	}{
+		{"MSET", []string{"MSET", "one", "new-one", "two", "new-two"}},
+		{"MSETNX", []string{"MSETNX", "three", "new-three", "four", "new-four"}},
+		{"DEL", []string{"DEL", "one", "two"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			storage := newRedisTestEngine()
+			db, err := kvlite.OpenWithEngine(storage, kvlite.BackendRocksDB)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			server, err := Serve(db, Options{ListenAddress: "127.0.0.1:0"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = server.Close() })
+			client := newRedisTestClient(t, server.URL()[len("redis://"):])
+			assertRedisSimple(t, client.do(t, "SET", "one", "old-one"), "OK")
+			assertRedisSimple(t, client.do(t, "SET", "two", "old-two"), "OK")
+			storage.mu.Lock()
+			storage.applyCount = 0
+			storage.failOnApply = 2
+			storage.mu.Unlock()
+			reply := client.do(t, test.command...)
+			storage.mu.Lock()
+			count := storage.applyCount
+			storage.failOnApply = 0
+			storage.mu.Unlock()
+			if count != 1 {
+				t.Fatalf("%s used %d engine batches, want one", test.name, count)
+			}
+			switch test.name {
+			case "MSET":
+				assertRedisSimple(t, reply, "OK")
+				assertRedisBulk(t, client.do(t, "GET", "one"), "new-one")
+				assertRedisBulk(t, client.do(t, "GET", "two"), "new-two")
+			case "MSETNX":
+				assertRedisInteger(t, reply, 1)
+				assertRedisBulk(t, client.do(t, "GET", "three"), "new-three")
+				assertRedisBulk(t, client.do(t, "GET", "four"), "new-four")
+			case "DEL":
+				assertRedisInteger(t, reply, 2)
+				assertRedisInteger(t, client.do(t, "EXISTS", "one", "two"), 0)
+			}
+		})
+	}
+}
+
+func TestRedisMultiKeyBatchFailureLeavesOldValues(t *testing.T) {
+	storage := newRedisTestEngine()
+	db, err := kvlite.OpenWithEngine(storage, kvlite.BackendRocksDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	server, err := Serve(db, Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
+	client := newRedisTestClient(t, server.URL()[len("redis://"):])
+	assertRedisSimple(t, client.do(t, "SET", "one", "old-one"), "OK")
+	assertRedisSimple(t, client.do(t, "SET", "two", "old-two"), "OK")
+	storage.mu.Lock()
+	storage.applyError = errors.New("injected batch failure")
+	storage.mu.Unlock()
+	for _, command := range [][]string{
+		{"MSET", "one", "new-one", "two", "new-two"},
+		{"MSETNX", "three", "new-three", "four", "new-four"},
+		{"DEL", "one", "two"},
+	} {
+		if reply := client.do(t, command...); reply.kind != respError {
+			t.Fatalf("%s = %#v, want error", command[0], reply)
+		}
+	}
+	storage.mu.Lock()
+	storage.applyError = nil
+	storage.mu.Unlock()
+	assertRedisBulk(t, client.do(t, "GET", "one"), "old-one")
+	assertRedisBulk(t, client.do(t, "GET", "two"), "old-two")
+	assertRedisInteger(t, client.do(t, "EXISTS", "three", "four"), 0)
+}
+
+func TestAttachedRedisMultiKeyWritesUseOwnerBatch(t *testing.T) {
+	storage := newRedisTestEngine()
+	owner, err := kvlite.OpenWithEngine(storage, kvlite.BackendRocksDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+	httpServer, err := kvlitehttp.Serve(owner, kvlitehttp.Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = httpServer.Close() })
+	remote, err := kvlitehttp.Connect(httpServer.URL(), kvlitehttp.ClientOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remote.Close() })
+	redisServer, err := ServeRemote(remote, Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = redisServer.Close() })
+	client := newRedisTestClient(t, redisServer.URL()[len("redis://"):])
+	assertRedisSimple(t, client.do(t, "SET", "one", "old-one"), "OK")
+	assertRedisSimple(t, client.do(t, "SET", "two", "old-two"), "OK")
+	storage.mu.Lock()
+	storage.applyCount = 0
+	storage.failOnApply = 2
+	storage.mu.Unlock()
+	assertRedisSimple(t, client.do(t, "MSET", "one", "new-one", "two", "new-two"), "OK")
+	storage.mu.Lock()
+	count := storage.applyCount
+	storage.failOnApply = 0
+	storage.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("attached MSET used %d owner batches, want one", count)
+	}
+	assertRedisBulk(t, client.do(t, "GET", "one"), "new-one")
+	assertRedisBulk(t, client.do(t, "GET", "two"), "new-two")
+	binaryKey := string([]byte{0xff, 0x00, 'x'})
+	assertRedisSimple(t, client.do(t, "MSET", binaryKey, "binary", "ascii", "plain"), "OK")
+	assertRedisBulk(t, client.do(t, "GET", binaryKey), "binary")
+	assertRedisInteger(t, client.do(t, "DEL", binaryKey, "ascii"), 2)
 }
 
 func TestFailedRedisSetPreservesOldCollection(t *testing.T) {

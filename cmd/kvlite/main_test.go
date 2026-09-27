@@ -71,7 +71,7 @@ func TestModuleListShowsCombinedExtensionKinds(t *testing.T) {
 	if err := os.MkdirAll(packageDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := []byte(`{"schema_version":2,"name":"combo","kinds":["engine","transport"],"version":"v0.1.0","module_abi":1,"driver":"combo-engine","license":"Apache-2.0"}`)
+	manifest := []byte(`{"schema_version":2,"name":"combo","kinds":["engine","transport"],"version":"v0.1.0","module_abi":1,"driver":"combo-engine","capabilities":["embedded-storage","atomic-batch"],"license":"Apache-2.0"}`)
 	if err := os.WriteFile(filepath.Join(packageDir, kvlite.ModuleManifestFilename), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestModuleVerifyChecksDiscoveredBundle(t *testing.T) {
   "version": "v0.1.0",
   "module_abi": 1,
   "driver": "leveldb",
-  "capabilities": ["embedded-storage"],
+  "capabilities": ["embedded-storage", "atomic-batch"],
   "license": "Apache-2.0",
   "artifacts": [{
     "platform": "` + runtime.GOOS + `-` + runtime.GOARCH + `",

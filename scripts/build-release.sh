@@ -430,13 +430,13 @@ write_module_manifest() {
     printf '  "module_abi": 1,\n'
     printf '  "driver": "%s",\n' "$driver"
     if [[ "$driver" == "rocksdb" ]]; then
-      printf '  "capabilities": ["embedded-storage", "ttl-compaction"],\n'
+      printf '  "capabilities": ["embedded-storage", "atomic-batch", "ttl-compaction"],\n'
       printf '  "license": "Apache-2.0",\n'
     elif [[ "$driver" == "lmdb" ]]; then
-      printf '  "capabilities": ["embedded-storage", "native-cgo"],\n'
+      printf '  "capabilities": ["embedded-storage", "atomic-batch", "native-cgo"],\n'
       printf '  "license": "BSD-3-Clause AND OLDAP-2.8",\n'
     else
-      printf '  "capabilities": ["embedded-storage"],\n'
+      printf '  "capabilities": ["embedded-storage", "atomic-batch"],\n'
       if [[ "$driver" == "berkeleydb" ]]; then
         printf '  "license": "LicenseRef-Oracle-BerkeleyDB-separate-distribution",\n'
       elif [[ "$driver" == "boltdb" ]]; then

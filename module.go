@@ -32,6 +32,10 @@ const (
 	// independently distributed module. It is distinct from the C embedding ABI
 	// exposed by capi/kvlite.h.
 	ModuleABIVersion = 1
+	// ModuleCapabilityAtomicBatch is required of engine modules by the current
+	// host. Module ABI 1 describes the registration layout; this capability
+	// advertises the required atomic write operation within that layout.
+	ModuleCapabilityAtomicBatch = "atomic-batch"
 )
 
 // ModuleKind identifies a KVLite module category.
@@ -455,6 +459,18 @@ func (manifest ModuleManifest) Validate() error {
 	}
 	if err := validateModuleTokens(manifest.Name, "capability", manifest.Capabilities); err != nil {
 		return err
+	}
+	if manifest.Provides(ModuleKindEngine) {
+		hasAtomicBatch := false
+		for _, capability := range manifest.Capabilities {
+			if capability == ModuleCapabilityAtomicBatch {
+				hasAtomicBatch = true
+				break
+			}
+		}
+		if !hasAtomicBatch {
+			return fmt.Errorf("%w: engine module %q lacks required %q capability; rebuild it against the current KVLite engine contract", ErrModuleIncompatible, manifest.Name, ModuleCapabilityAtomicBatch)
+		}
 	}
 	dependencies := make(map[string]struct{}, len(manifest.Dependencies))
 	for _, dependency := range manifest.Dependencies {

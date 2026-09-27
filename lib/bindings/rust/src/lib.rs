@@ -317,8 +317,7 @@ impl LibraryFinder {
         if let Some(path) = env::var_os("KVLITE_LIBRARY_PATH") {
             candidates.push(PathBuf::from(path));
         }
-        if let Some(home) = env::var_os("KVLITE_HOME") {
-            let home = PathBuf::from(home);
+        for home in Self::catalog_roots() {
             if let Some(driver) = driver {
                 candidates.push(home.join("drivers").join(driver).join("lib").join(Self::library_name()));
             }
@@ -374,6 +373,31 @@ impl LibraryFinder {
             env::consts::ARCH
         };
         format!("{os}-{architecture}")
+    }
+
+    fn catalog_roots() -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        if let Some(home) = env::var_os("KVLITE_HOME") {
+            roots.push(PathBuf::from(home));
+        }
+        if let Some(paths) = env::var_os("KVLITE_SYSTEM_MODULE_PATH") {
+            roots.extend(env::split_paths(&paths));
+        }
+        if cfg!(target_os = "windows") {
+            for variable in ["LOCALAPPDATA", "ProgramFiles"] {
+                if let Some(base) = env::var_os(variable) {
+                    roots.push(PathBuf::from(base).join("KVLite/lib/kvlite"));
+                }
+            }
+        } else {
+            if let Some(home) = env::var_os("HOME") {
+                roots.push(PathBuf::from(home).join(".local/lib/kvlite"));
+            }
+            roots.push(PathBuf::from("/usr/local/lib/kvlite"));
+            roots.push(PathBuf::from("/usr/lib/kvlite"));
+        }
+        roots.dedup();
+        roots
     }
 
     fn sole_driver_bundle(home: &Path) -> Option<PathBuf> {

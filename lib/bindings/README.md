@@ -7,10 +7,16 @@ load, and resolves a matching library in this order:
 
 1. an explicit library path;
 2. `KVLITE_LIBRARY_PATH`;
-3. `KVLITE_HOME/drivers/<driver>/lib` (or the sole installed driver bundle),
-   then the legacy `KVLITE_HOME/lib`; then
+3. the selected driver (or sole installed bundle) in `KVLITE_HOME`, each
+   `KVLITE_SYSTEM_MODULE_PATH` catalog, and standard user/system catalogs
+   such as `~/.local/lib/kvlite` and `/usr/local/lib/kvlite`; then
 4. a matching `native/<os>-<arch>` package asset or local `dist/dev` driver
    bundle.
+
+The same installed driver catalog serves the CLI and all four embedded
+bindings. A default-prefix online installation needs no per-language library
+path; a custom prefix uses its `lib/kvlite` catalog in
+`KVLITE_SYSTEM_MODULE_PATH`.
 
 | Directory | Package name | Local API | Remote API | Binding test |
 | --- | --- | --- | --- | --- |
@@ -35,9 +41,10 @@ listener.
 
 The wrappers serialize normal values as JSON and each native wrapper also has a
 raw byte API for applications that choose MessagePack, protobuf, or another
-codec. Packages are source-ready for Composer, PyPI, npm, and crates.io; the
-native asset-publishing phase remains separate because the current release
-artifact does not yet bundle RocksDB's runtime dependencies. LevelDB is pure
+codec. Packages are source-ready for Composer, PyPI, npm, and crates.io, but
+are not yet claimed as published registry packages. Release CI builds a
+self-contained RocksDB runtime bundle on Linux and macOS; real release assets
+and registry publication still need validation. LevelDB is pure
 Go inside KVLite, but its embedded selection still requires a current
 driver bundle exporting `kvlite_open_with_driver` (or the ABI-compatible
 `kvlite_open_with_backend` alias).

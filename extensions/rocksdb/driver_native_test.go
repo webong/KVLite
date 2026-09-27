@@ -18,6 +18,10 @@ func TestAtomicMutations(t *testing.T) {
 	enginetest.RunAtomicMutations(t, kvlite.DriverRocksDB)
 }
 
+func TestProcessExitRecovery(t *testing.T) {
+	enginetest.RunProcessExitRecovery(t, kvlite.DriverRocksDB)
+}
+
 // TestRocksDBDriverOpensAndPersistsKVLiteRecords exercises the actual cgo
 // adapter rather than merely compiling it. It is the native smoke test used
 // by both the host-tagged and Docker RocksDB suites.

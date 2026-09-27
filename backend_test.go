@@ -134,6 +134,7 @@ func TestOpenDefaultDriverReportsInstalledButNotLoadedModule(t *testing.T) {
 	manifest := testExtensionManifest(string(DriverRocksDB))
 	manifest.Kind = ModuleKindEngine
 	manifest.Driver = DriverRocksDB
+	manifest.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch}
 	writeTestModuleManifest(t, filepath.Join(root, "rocksdb"), manifest)
 
 	t.Setenv("KVLITE_MODULE_PATH", root)
@@ -150,6 +151,7 @@ func TestOpenReportsInstalledDriverModuleWithoutLinkedAdapter(t *testing.T) {
 	manifest := testExtensionManifest("leveldb")
 	manifest.Kind = ModuleKindEngine
 	manifest.Driver = DriverLevelDB
+	manifest.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch}
 	writeTestModuleManifest(t, filepath.Join(root, "leveldb"), manifest)
 
 	t.Setenv("KVLITE_MODULE_PATH", root)

@@ -29,7 +29,7 @@ func Manifest() kvlite.ModuleManifest {
 		Version:       "v0.1.0",
 		ModuleABI:     kvlite.ModuleABIVersion,
 		Driver:        Name,
-		Capabilities:  []string{"embedded-storage", "ttl-compaction"},
+		Capabilities:  []string{"embedded-storage", kvlite.ModuleCapabilityAtomicBatch, "ttl-compaction"},
 		License:       "Apache-2.0",
 	}
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Webong\KVLite\Exception\NotFoundException;
 use Webong\KVLite\HttpDatabase;
 use Webong\KVLite\KVLite;
+use Webong\KVLite\Native\LibraryFinder;
 
 $package = dirname(__DIR__);
 spl_autoload_register(static function (string $class) use ($package): void {
@@ -27,6 +28,26 @@ function check(bool $condition, string $message): void
 
 $library = $argv[1] ?? '';
 check($library !== '', 'mock library path is required');
+
+$catalog = sys_get_temp_dir().'/kvlite-php-catalog-'.bin2hex(random_bytes(6));
+$installed = $catalog.'/drivers/leveldb/lib/'.basename($library);
+check(mkdir(dirname($installed), 0700, true), 'cannot create test catalog');
+check(copy($library, $installed), 'cannot copy test library');
+$previousCatalog = getenv('KVLITE_SYSTEM_MODULE_PATH');
+$previousLibrary = getenv('KVLITE_LIBRARY_PATH');
+$previousHome = getenv('KVLITE_HOME');
+putenv('KVLITE_SYSTEM_MODULE_PATH='.$catalog);
+putenv('KVLITE_LIBRARY_PATH');
+putenv('KVLITE_HOME');
+check(LibraryFinder::find(driver: 'leveldb') === $installed, 'installed driver catalog was not discovered');
+$previousCatalog === false ? putenv('KVLITE_SYSTEM_MODULE_PATH') : putenv('KVLITE_SYSTEM_MODULE_PATH='.$previousCatalog);
+$previousLibrary === false ? putenv('KVLITE_LIBRARY_PATH') : putenv('KVLITE_LIBRARY_PATH='.$previousLibrary);
+$previousHome === false ? putenv('KVLITE_HOME') : putenv('KVLITE_HOME='.$previousHome);
+unlink($installed);
+rmdir(dirname($installed));
+rmdir(dirname(dirname($installed)));
+rmdir(dirname(dirname(dirname($installed))));
+rmdir($catalog);
 
 $database = KVLite::open('/tmp/kvlite-php-mock', $library, driver: 'leveldb');
 $database->put('user:101', ['id' => 101, 'name' => 'Ada'], 60);

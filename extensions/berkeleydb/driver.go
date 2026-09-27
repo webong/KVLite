@@ -34,7 +34,7 @@ func Manifest() kvlite.ModuleManifest {
 		Version:       "v0.1.0",
 		ModuleABI:     kvlite.ModuleABIVersion,
 		Driver:        Name,
-		Capabilities:  []string{"embedded-storage", "native-cgo", "license-gated"},
+		Capabilities:  []string{"embedded-storage", kvlite.ModuleCapabilityAtomicBatch, "native-cgo", "license-gated"},
 		License:       "LicenseRef-Oracle-BerkeleyDB-separate-distribution",
 	}
 }

@@ -21,8 +21,10 @@ python -m pip install 'git+https://github.com/webong/KVlite.git#subdirectory=lib
 
 ## Embedded use
 
-Build or download the native library for the same OS/architecture, then set
-its explicit path:
+Install a matching driver bundle for your OS/architecture. The binding finds
+the CLI's installed catalog at standard prefixes, or via
+`KVLITE_SYSTEM_MODULE_PATH` for a custom prefix. An exact path remains an
+optional override:
 
 ```bash
 export KVLITE_LIBRARY_PATH=/opt/kvlite/lib/libkvlite.dylib  # .so on Linux

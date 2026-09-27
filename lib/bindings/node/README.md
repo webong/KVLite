@@ -27,8 +27,9 @@ the normal package name `@webong/kvlite` available.
 ## Embedded use
 
 The first install/source build compiles the small N-API loader with `node-gyp`.
-It dynamically loads KVLite's separate shared library, so point it at the
-matching release artifact:
+It loads an installed driver bundle from the same catalog as the CLI. Standard
+prefixes are automatic; use `KVLITE_SYSTEM_MODULE_PATH` for a custom prefix or
+`KVLITE_LIBRARY_PATH` for an exact file:
 
 ```bash
 export KVLITE_LIBRARY_PATH=/opt/kvlite/lib/libkvlite.dylib # .so on Linux

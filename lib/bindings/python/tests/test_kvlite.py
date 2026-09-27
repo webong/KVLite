@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from kvlite import HttpDatabase, KVLite, NotFoundError
+from kvlite.native import LibraryFinder
 
 
 class NativeDatabaseTests(unittest.TestCase):
+    def test_finds_installed_driver_in_system_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            library = Path(root) / "drivers" / "leveldb" / "lib" / LibraryFinder._library_name()
+            library.parent.mkdir(parents=True)
+            shutil.copyfile(os.environ["KVLITE_TEST_LIBRARY"], library)
+            with patch.dict(os.environ, {"KVLITE_SYSTEM_MODULE_PATH": root, "KVLITE_LIBRARY_PATH": "", "KVLITE_HOME": ""}):
+                self.assertEqual(LibraryFinder.find(driver="leveldb"), library.resolve())
+
     def test_json_and_binary_round_trip(self) -> None:
         database = KVLite.open("/tmp/kvlite-python-mock", os.environ["KVLITE_TEST_LIBRARY"], driver="leveldb")
         self.addCleanup(database.close)

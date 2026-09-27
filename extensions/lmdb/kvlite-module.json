@@ -5,6 +5,6 @@
   "version": "v0.1.0",
   "module_abi": 1,
   "driver": "lmdb",
-  "capabilities": ["embedded-storage", "native-cgo"],
+  "capabilities": ["embedded-storage", "atomic-batch", "native-cgo"],
   "license": "BSD-3-Clause AND OLDAP-2.8"
 }

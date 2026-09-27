@@ -35,7 +35,9 @@
  *   managed above the engine by the core.
  * - Scans snapshot at open; later writes are not visible through an open
  *   cursor. An empty prefix matches every key. Scan operations and the
- *   companion atomic-apply symbol are required by current KVLite hosts.
+ *   companion atomic-apply symbol are required by current KVLite hosts. The
+ *   installed engine manifest and driver registration must also advertise
+ *   the "atomic-batch" capability.
  */
 #ifndef KVLITE_MODULE_H
 #define KVLITE_MODULE_H

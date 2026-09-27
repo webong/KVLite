@@ -21,6 +21,8 @@ case "$(uname -s)" in
     ;;
 esac
 
+KVLITE_TEST_LIBRARY="$library" node "$package_dir/tests/finder.mjs"
+
 node_root="$(cd "$(dirname "$(node -p 'process.execPath')")/.." && pwd)"
 node_gyp="$node_root/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
 if [[ ! -f "$node_gyp" ]]; then

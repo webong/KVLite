@@ -28,7 +28,9 @@ The package source is in `lib/bindings/php`; publishing will make the
 
 ## Embedded use
 
-Build or download the matching `libkvlite` first, then point PHP at it:
+Install a matching driver bundle first. PHP finds the CLI's catalog at
+standard prefixes or through `KVLITE_SYSTEM_MODULE_PATH` for a custom prefix;
+an exact path remains optional:
 
 ```bash
 export KVLITE_LIBRARY_PATH=/opt/kvlite/lib/libkvlite.dylib # .so on Linux

@@ -345,11 +345,16 @@ func (db *database) redisMSet(args [][]byte) respValue {
 	if len(args) < 3 || len(args)%2 != 1 {
 		return redisSyntaxError()
 	}
+	values := make([]kvlite.LogicalValue, 0, (len(args)-1)/2)
 	for index := 1; index < len(args); index += 2 {
-		key := string(args[index])
-		if err := db.redisWriteString(context.Background(), key, args[index+1], 0); err != nil {
+		encoded, err := db.encodeRecord(bytesCodec, args[index+1], 0)
+		if err != nil {
 			return redisErrorReply(err)
 		}
+		values = append(values, kvlite.LogicalValue{Key: args[index], Value: encoded})
+	}
+	if _, err := db.store.ReplaceLogicalValues(context.Background(), values, false); err != nil {
+		return redisErrorReply(err)
 	}
 	return respSimpleString("OK")
 }
@@ -367,10 +372,20 @@ func (db *database) redisMSetNX(args [][]byte) respValue {
 			return respIntegerValue(0)
 		}
 	}
+	values := make([]kvlite.LogicalValue, 0, (len(args)-1)/2)
 	for index := 1; index < len(args); index += 2 {
-		if err := db.redisWriteString(context.Background(), string(args[index]), args[index+1], 0); err != nil {
+		encoded, err := db.encodeRecord(bytesCodec, args[index+1], 0)
+		if err != nil {
 			return redisErrorReply(err)
 		}
+		values = append(values, kvlite.LogicalValue{Key: args[index], Value: encoded})
+	}
+	applied, err := db.store.ReplaceLogicalValues(context.Background(), values, true)
+	if err != nil {
+		return redisErrorReply(err)
+	}
+	if !applied {
+		return respIntegerValue(0)
 	}
 	return respIntegerValue(1)
 }
@@ -471,17 +486,15 @@ func (db *database) redisDelete(args [][]byte) respValue {
 	if len(args) < 2 {
 		return redisSyntaxError()
 	}
-	var count int64
+	keys := make([][]byte, 0, len(args)-1)
 	for _, arg := range args[1:] {
-		deleted, err := db.redisDeleteRaw(context.Background(), string(arg))
-		if err != nil {
-			return redisErrorReply(err)
-		}
-		if deleted {
-			count++
-		}
+		keys = append(keys, arg)
 	}
-	return respIntegerValue(count)
+	count, err := db.store.DeleteLogicalKeys(context.Background(), keys)
+	if err != nil {
+		return redisErrorReply(err)
+	}
+	return respIntegerValue(int64(count))
 }
 
 func (db *database) redisExists(args [][]byte) respValue {

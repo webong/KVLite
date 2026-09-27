@@ -28,7 +28,7 @@ func init() {
 		Version:       "v0.1.0",
 		ModuleABI:     ModuleABIVersion,
 		Driver:        DriverMemory,
-		Capabilities:  []string{"embedded-storage", "ephemeral"},
+		Capabilities:  []string{"embedded-storage", ModuleCapabilityAtomicBatch, "ephemeral"},
 		License:       "Apache-2.0",
 	})
 }

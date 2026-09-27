@@ -58,12 +58,14 @@ defer remote.Close()
 _ = remote.Put(context.Background(), "user:101", map[string]any{"name": "Ada"})
 ```
 
-The Go HTTP client sends scalar replacement, `SAdd`, `SRemove`, and `HDelete`
-as whole owner-side operations. Concurrent calls to the set and hash mutations
-receive correct added/removed counts; reads do not see a gap during scalar
-replacement. List pushes also use an owner-side operation. Other multi-step
-remote operations, including commands issued by an attached Redis process,
-are not yet atomic across clients; do not treat this as a transactional API.
+The Go HTTP client sends scalar and multi-key replacement, multi-key deletion,
+`SAdd`, `SRemove`, and `HDelete` as whole owner-side operations. Concurrent
+calls to the set and hash mutations receive correct added/removed counts;
+reads do not see a gap during scalar replacement. List pushes also use an
+owner-side operation. Attached Redis `MSET`, `MSETNX`, and multi-key `DEL` use
+one owner-side batch. Other multi-step remote operations, including Redis
+read-modify-write commands, are not yet atomic across clients; do not treat
+the whole transport as a transactional API.
 Newer clients require an owner with these routes; an older owner reports a
 module-incompatibility error for unsupported mutations.
 

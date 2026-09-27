@@ -18,7 +18,7 @@ func Manifest() kvlite.ModuleManifest {
 		SchemaVersion: kvlite.ModuleManifestVersion,
 		Name:          string(Name), Kind: kvlite.ModuleKindEngine,
 		Version: "v0.1.0", ModuleABI: kvlite.ModuleABIVersion,
-		Driver: Name, Capabilities: []string{"embedded-storage", "native-cgo"}, License: "BSD-3-Clause AND OLDAP-2.8",
+		Driver: Name, Capabilities: []string{"embedded-storage", kvlite.ModuleCapabilityAtomicBatch, "native-cgo"}, License: "BSD-3-Clause AND OLDAP-2.8",
 	}
 }
 

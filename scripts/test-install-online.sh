@@ -28,11 +28,14 @@ case "$target" in
 esac
 
 work_root="$(mktemp -d "${TMPDIR:-/tmp}/kvlite-install-online-test.XXXXXX")"
+test_version="install-test-$$"
+[[ ! -e "$repo_root/dist/$test_version" ]] || fail "temporary release version already exists: $test_version"
 cleanup() {
   if [[ -n "${server_pid:-}" ]] && kill -0 "$server_pid" 2>/dev/null; then kill "$server_pid" 2>/dev/null || true; fi
   if [[ -n "${bad_server_pid:-}" ]] && kill -0 "$bad_server_pid" 2>/dev/null; then kill "$bad_server_pid" 2>/dev/null || true; fi
   if [[ -n "${app_pid:-}" ]] && kill -0 "$app_pid" 2>/dev/null; then kill "$app_pid" 2>/dev/null || true; fi
   wait 2>/dev/null || true
+  rm -rf "$repo_root/dist/$test_version"
   rm -rf "$work_root"
 }
 trap cleanup EXIT
@@ -42,14 +45,14 @@ free_port() {
 }
 
 echo "install-online test: building release bundles" >&2
-bash "$repo_root/scripts/build-release.sh" --version latest --driver none >/dev/null
-bash "$repo_root/scripts/build-release.sh" --version latest --driver "$driver" >/dev/null
-bash "$repo_root/scripts/build-release.sh" --version latest --extension http >/dev/null
-bash "$repo_root/scripts/build-release.sh" --version latest --extension redis >/dev/null
+bash "$repo_root/scripts/build-release.sh" --version "$test_version" --driver none >/dev/null
+bash "$repo_root/scripts/build-release.sh" --version "$test_version" --driver "$driver" >/dev/null
+bash "$repo_root/scripts/build-release.sh" --version "$test_version" --extension http >/dev/null
+bash "$repo_root/scripts/build-release.sh" --version "$test_version" --extension redis >/dev/null
 
 assets="$work_root/assets"
-bash "$repo_root/scripts/make-release-tarballs.sh" --version latest --out "$assets" >/dev/null
-base="kvlite-latest-$target"
+bash "$repo_root/scripts/make-release-tarballs.sh" --version "$test_version" --out "$assets" >/dev/null
+base="kvlite-$test_version-$target"
 [[ -f "$assets/$base.tar.gz" && -f "$assets/$base.tar.gz.sha256" ]] || fail "tarballs missing"
 
 port="$(free_port)"
@@ -65,6 +68,7 @@ prefix="$work_root/prefix"
 echo "install-online test: installing from asset server" >&2
 bash "$repo_root/scripts/install-online.sh" \
   --base-url "http://127.0.0.1:$port" \
+  --version "$test_version" \
   --prefix "$prefix" \
   --driver "$driver" \
   --yes >/dev/null || fail "online install failed"
@@ -84,23 +88,32 @@ http_port="$(free_port)"
 app_pid=$!
 ready=0
 for _ in $(seq 1 100); do
-  if curl -fsS "http://127.0.0.1:$http_port/v1" >/dev/null 2>&1; then ready=1; break; fi
+  if curl -fsS --max-time 5 "http://127.0.0.1:$http_port/v1" >/dev/null 2>&1; then ready=1; break; fi
   sleep 0.2
 done
 [[ "$ready" == "1" ]] || { cat "$work_root/serve.log" >&2; fail "installed server did not start"; }
 key="$(python3 -c 'import base64; print(base64.urlsafe_b64encode(b"online-key").decode().rstrip("="))')"
-curl -fsS -X PUT "http://127.0.0.1:$http_port/v1/entries/$key" -H 'Content-Type: application/json' -d '{"online":true}' >/dev/null || fail "installed PUT failed"
-got="$(curl -fsS "http://127.0.0.1:$http_port/v1/entries/$key")" || fail "installed GET failed"
+curl -fsS --max-time 5 -X PUT "http://127.0.0.1:$http_port/v1/entries/$key" -H 'Content-Type: application/json' -d '{"online":true}' >/dev/null || fail "installed PUT failed"
+got="$(curl -fsS --max-time 5 "http://127.0.0.1:$http_port/v1/entries/$key")" || fail "installed GET failed"
 [[ "$got" == '{"online":true}' ]] || fail "installed GET body = $got"
 kill "$app_pid" 2>/dev/null || true
 wait "$app_pid" 2>/dev/null || true
 app_pid=""
+
+echo "install-online test: opening installed driver from Python without an explicit library path" >&2
+PYTHONPATH="$repo_root/lib/bindings/python/src" \
+KVLITE_LIBRARY_PATH="" KVLITE_HOME="" KVLITE_SYSTEM_MODULE_PATH="$prefix/lib/kvlite" \
+KVLITE_TEST_DATA="$work_root/python-data" KVLITE_TEST_DRIVER="$driver" \
+  python3 -c 'import os; from kvlite import KVLite; db = KVLite.open(os.environ["KVLITE_TEST_DATA"], driver=os.environ["KVLITE_TEST_DRIVER"]); db.put("installed", {"ok": True}); assert db.get("installed") == {"ok": True}; db.close()' \
+  || fail "Python could not open the installed driver without KVLITE_LIBRARY_PATH"
+
 export KVLITE_SYSTEM_MODULE_PATH=""
 
 echo "install-online test: host-only default installs no persistent engine" >&2
 host_prefix="$work_root/host-prefix"
 bash "$repo_root/scripts/install-online.sh" \
   --base-url "http://127.0.0.1:$port" \
+  --version "$test_version" \
   --prefix "$host_prefix" \
   --yes >/dev/null || fail "host-only online install failed"
 [[ -x "$host_prefix/bin/kvlite" ]] || fail "host binary missing"
@@ -118,7 +131,7 @@ bad_port="$(free_port)"
 (cd "$bad" && python3 -m http.server "$bad_port" >/dev/null 2>&1) &
 bad_server_pid=$!
 sleep 1
-if bash "$repo_root/scripts/install-online.sh" --base-url "http://127.0.0.1:$bad_port" --prefix "$work_root/bad-prefix" --yes >/dev/null 2>&1; then
+if bash "$repo_root/scripts/install-online.sh" --version "$test_version" --base-url "http://127.0.0.1:$bad_port" --prefix "$work_root/bad-prefix" --yes >/dev/null 2>&1; then
   fail "tampered tarball was accepted"
 fi
 

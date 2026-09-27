@@ -78,6 +78,79 @@ paths:
           $ref: '#/components/responses/DriverUnavailable'
         '501':
           $ref: '#/components/responses/DriverUnavailable'
+  /v1/logical/replace-many:
+    post:
+      summary: Atomically replace several logical keys with encoded scalar records
+      description: |
+        Trusted transport route. The owner removes old collection records and
+        writes every supplied value in one engine batch. If only_if_absent is
+        true and any target key has records, no values are written. Duplicate
+        keys use the last supplied value. The caller must supply valid KVLite
+        value envelopes.
+      parameters:
+        - $ref: '#/components/parameters/Driver'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [values]
+              properties:
+                values:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/LogicalValue'
+                only_if_absent:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Applied is false only when the conditional write found an existing key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [applied]
+                properties:
+                  applied:
+                    type: boolean
+        '400':
+          description: Invalid or oversized replacement request
+        '409':
+          $ref: '#/components/responses/DriverUnavailable'
+  /v1/logical/delete-many:
+    post:
+      summary: Atomically delete several logical keys
+      description: Trusted transport route; duplicate names are counted once.
+      parameters:
+        - $ref: '#/components/parameters/Driver'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                contentEncoding: base64
+                description: Standard base64 encoding of a logical key's raw bytes.
+      responses:
+        '200':
+          description: Number of logical keys that had records removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: integer
+                    minimum: 0
+        '400':
+          description: Invalid or oversized deletion request
+        '409':
+          $ref: '#/components/responses/DriverUnavailable'
   /v1/entries/{key}:
     parameters:
       - $ref: '#/components/parameters/Key'
@@ -171,6 +244,18 @@ components:
           schema:
             $ref: '#/components/schemas/DriverError'
   schemas:
+    LogicalValue:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+          contentEncoding: base64
+          description: Standard base64 encoding of a logical key's raw bytes.
+        value:
+          type: string
+          contentEncoding: base64
+          description: Standard base64 encoding of a KVLite value envelope.
     Mutation:
       type: object
       required: [key]

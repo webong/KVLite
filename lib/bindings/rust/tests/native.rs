@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kvlite::{Database, Error};
+use kvlite::{Database, Error, LibraryFinder};
 use serde_json::json;
 
 struct MockLibrary {
@@ -61,4 +61,23 @@ fn native_json_and_binary_round_trip() {
     database.delete(b"binary\0key").unwrap();
     assert!(matches!(database.get_bytes(b"binary\0key"), Err(Error::NotFound(_))));
     database.close().unwrap();
+}
+
+#[test]
+fn finds_installed_driver_in_system_catalog() {
+    let mock = MockLibrary::compile();
+    let catalog = mock.directory.join("catalog");
+    let installed = catalog.join("drivers/leveldb/lib").join(mock.path.file_name().unwrap());
+    fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    fs::copy(&mock.path, &installed).unwrap();
+    let previous_catalog = env::var_os("KVLITE_SYSTEM_MODULE_PATH");
+    let previous_library = env::var_os("KVLITE_LIBRARY_PATH");
+    let previous_home = env::var_os("KVLITE_HOME");
+    env::set_var("KVLITE_SYSTEM_MODULE_PATH", &catalog);
+    env::remove_var("KVLITE_LIBRARY_PATH");
+    env::remove_var("KVLITE_HOME");
+    assert_eq!(LibraryFinder::find(None, Some("leveldb")).unwrap(), installed);
+    match previous_catalog { Some(value) => env::set_var("KVLITE_SYSTEM_MODULE_PATH", value), None => env::remove_var("KVLITE_SYSTEM_MODULE_PATH") }
+    match previous_library { Some(value) => env::set_var("KVLITE_LIBRARY_PATH", value), None => env::remove_var("KVLITE_LIBRARY_PATH") }
+    match previous_home { Some(value) => env::set_var("KVLITE_HOME", value), None => env::remove_var("KVLITE_HOME") }
 }

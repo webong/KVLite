@@ -152,6 +152,7 @@ func openRuntimeModuleDB(t *testing.T, root string) *DB {
 	manifest := testExtensionManifest(string(DriverLevelDB))
 	manifest.Kind = ModuleKindEngine
 	manifest.Driver = DriverLevelDB
+	manifest.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch}
 	manifest.Artifacts = []ModuleArtifact{{
 		Platform: runtime.GOOS + "-" + runtime.GOARCH,
 		Kind:     ModuleArtifactCShared,

@@ -26,7 +26,7 @@ func Manifest() kvlite.ModuleManifest {
 		SchemaVersion: kvlite.ModuleManifestVersion,
 		Name:          string(Name), Kind: kvlite.ModuleKindEngine,
 		Version: "v0.1.0", ModuleABI: kvlite.ModuleABIVersion,
-		Driver: Name, Capabilities: []string{"embedded-storage"}, License: "Apache-2.0",
+		Driver: Name, Capabilities: []string{"embedded-storage", kvlite.ModuleCapabilityAtomicBatch}, License: "Apache-2.0",
 	}
 }
 

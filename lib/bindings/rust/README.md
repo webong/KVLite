@@ -20,7 +20,9 @@ kvlite = { git = "https://github.com/webong/KVlite", package = "kvlite" }
 
 ## Embedded use
 
-Build or download the matching native library and set its exact path:
+Install a matching driver bundle first. The crate finds the CLI's driver
+catalog at standard prefixes, or from `KVLITE_SYSTEM_MODULE_PATH` for a custom
+prefix. `KVLITE_LIBRARY_PATH` remains an exact-path override:
 
 ```bash
 export KVLITE_LIBRARY_PATH=/opt/kvlite/lib/libkvlite.dylib # .so on Linux

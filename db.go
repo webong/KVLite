@@ -242,6 +242,44 @@ func (db *DB) replaceLogicalValue(ctx context.Context, key string, encoded []byt
 	return nil
 }
 
+func (db *DB) replaceLogicalValues(ctx context.Context, values []LogicalValue, onlyIfAbsent bool) (bool, error) {
+	if remote, ok := db.engine.(interface {
+		ReplaceLogicalValues(context.Context, []LogicalValue, bool) (bool, error)
+	}); ok {
+		if applied, err := remote.ReplaceLogicalValues(ctx, values, onlyIfAbsent); !errors.Is(err, errAtomicMultiReplaceUnsupported) {
+			return applied, err
+		}
+	}
+	lastValue := make(map[string][]byte, len(values))
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		key := string(value.Key)
+		if _, err := unmarshalEnvelope(value.Value); err != nil {
+			return false, fmt.Errorf("%w: invalid value for key %q: %v", ErrInvalidArgument, key, err)
+		}
+		if _, found := lastValue[key]; !found {
+			keys = append(keys, key)
+		}
+		lastValue[key] = value.Value
+	}
+	mutations := make([]Mutation, 0, len(keys)*2)
+	for _, key := range keys {
+		removals, err := db.logicalKeyMutations(ctx, key)
+		if err != nil {
+			return false, err
+		}
+		if onlyIfAbsent && len(removals) != 0 {
+			return false, nil
+		}
+		mutations = append(mutations, removals...)
+		mutations = append(mutations, Mutation{Key: valueKey(key), Value: lastValue[key]})
+	}
+	if err := db.engine.Apply(ctx, mutations); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Get decodes a stored value into target, which must be a non-nil pointer.
 func (db *DB) Get(ctx context.Context, key string, target any) error {
 	if key == "" {

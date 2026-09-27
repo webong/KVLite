@@ -13,6 +13,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/webong/kvlite"
 )
@@ -190,6 +191,53 @@ func TestRemoteAtomicBatchAndLogicalReplacement(t *testing.T) {
 	}
 	if got, found, err := owner.Transport().Get(ctx, []byte("raw:b")); err != nil || !found || string(got) != "new" {
 		t.Fatalf("new raw key = %q, %t, %v", got, found, err)
+	}
+}
+
+func TestRemoteLogicalMultiKeyOperationsCommitAtOwner(t *testing.T) {
+	owner, server := openTestOwner(t, Options{ListenAddress: "127.0.0.1:0", BearerToken: "secret"})
+	remote, err := Connect(server.URL(), ClientOptions{BearerToken: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remote.Close() })
+	ctx := context.Background()
+	encode := func(value string) []byte {
+		record, err := owner.Protocol().EncodeRecord("json", []byte(`"`+value+`"`), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	values := []kvlite.LogicalValue{{Key: []byte("first"), Value: encode("one")}, {Key: []byte("second"), Value: encode("two")}}
+	if applied, err := remote.Protocol().ReplaceLogicalValues(ctx, values, true); err != nil || !applied {
+		t.Fatalf("first replace-many = %t, %v", applied, err)
+	}
+	if applied, err := remote.Protocol().ReplaceLogicalValues(ctx, []kvlite.LogicalValue{{Key: []byte("first"), Value: encode("changed")}, {Key: []byte("third"), Value: encode("three")}}, true); err != nil || applied {
+		t.Fatalf("conditional replace-many = %t, %v", applied, err)
+	}
+	for key, want := range map[string]string{"first": "one", "second": "two"} {
+		var got string
+		if err := owner.Get(ctx, key, &got); err != nil || got != want {
+			t.Fatalf("owner Get(%q) = %q, %v", key, got, err)
+		}
+	}
+	if deleted, err := remote.Protocol().DeleteLogicalKeys(ctx, [][]byte{[]byte("first"), []byte("second"), []byte("first")}); err != nil || deleted != 2 {
+		t.Fatalf("delete-many = %d, %v", deleted, err)
+	}
+	if found, err := owner.Has(ctx, "first"); err != nil || found {
+		t.Fatalf("first after deletion = %t, %v", found, err)
+	}
+	binaryKey := []byte{0xff, 0x00, 'x'}
+	if applied, err := remote.Protocol().ReplaceLogicalValues(ctx, []kvlite.LogicalValue{{Key: binaryKey, Value: encode("binary")}}, false); err != nil || !applied {
+		t.Fatalf("binary replace-many = %t, %v", applied, err)
+	}
+	var binaryValue string
+	if err := owner.Get(ctx, string(binaryKey), &binaryValue); err != nil || binaryValue != "binary" {
+		t.Fatalf("binary key value = %q, %v", binaryValue, err)
+	}
+	if deleted, err := remote.Protocol().DeleteLogicalKeys(ctx, [][]byte{binaryKey}); err != nil || deleted != 1 {
+		t.Fatalf("binary delete-many = %d, %v", deleted, err)
 	}
 }
 
@@ -557,6 +605,12 @@ func TestRemoteMutationExplainsOlderOwner(t *testing.T) {
 	if err := remote.Put(context.Background(), "key", "value"); !errors.Is(err, kvlite.ErrModuleIncompatible) {
 		t.Fatalf("Put() against an owner without logical replacement = %v, want ErrModuleIncompatible", err)
 	}
+	if _, err := remote.Protocol().ReplaceLogicalValues(context.Background(), nil, false); !errors.Is(err, kvlite.ErrModuleIncompatible) {
+		t.Fatalf("replace-many against an older owner = %v, want ErrModuleIncompatible", err)
+	}
+	if _, err := remote.Protocol().DeleteLogicalKeys(context.Background(), [][]byte{[]byte("key")}); !errors.Is(err, kvlite.ErrModuleIncompatible) {
+		t.Fatalf("delete-many against an older owner = %v, want ErrModuleIncompatible", err)
+	}
 }
 
 func TestJSONAPIAndAuthentication(t *testing.T) {
@@ -564,6 +618,7 @@ func TestJSONAPIAndAuthentication(t *testing.T) {
 		ListenAddress: "127.0.0.1:0",
 		BearerToken:   "secret",
 	})
+	client := &http.Client{Timeout: 5 * time.Second}
 	key := base64.RawURLEncoding.EncodeToString([]byte("http-key"))
 	request, err := http.NewRequest(http.MethodPut, server.URL()+"/v1/entries/"+key+"?ttl_seconds=60", bytes.NewBufferString(`{"answer":42}`))
 	if err != nil {
@@ -571,7 +626,7 @@ func TestJSONAPIAndAuthentication(t *testing.T) {
 	}
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +640,7 @@ func TestJSONAPIAndAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Authorization", "Bearer secret")
-	response, err = http.DefaultClient.Do(request)
+	response, err = client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,7 +658,7 @@ func TestJSONAPIAndAuthentication(t *testing.T) {
 		t.Fatalf("owner value/error = %#v, %v", stored, err)
 	}
 
-	response, err = http.Get(server.URL() + "/v1/entries/" + key)
+	response, err = client.Get(server.URL() + "/v1/entries/" + key)
 	if err != nil {
 		t.Fatal(err)
 	}

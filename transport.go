@@ -21,6 +21,15 @@ type TransportStore interface {
 	PushList(context.Context, []byte, [][]byte, bool) (int, error)
 }
 
+// LogicalValue is an encoded scalar record addressed by its KVLite logical
+// key. Keys are bytes because protocol clients may use non-UTF-8 keys; JSON
+// transports encode both fields as base64. Protocol extensions use it to
+// replace several logical keys atomically.
+type LogicalValue struct {
+	Key   []byte `json:"key"`
+	Value []byte `json:"value"`
+}
+
 // Transport returns the DB's protocol-extension record store. It lets an
 // optional transport preserve KVLite envelopes without making that transport a
 // dependency of the embeddable core.
@@ -41,7 +50,9 @@ type ProtocolStore interface {
 	Unlock()
 	Now() time.Time
 	DeleteLogicalKey(context.Context, string) (bool, error)
+	DeleteLogicalKeys(context.Context, [][]byte) (int, error)
 	ReplaceLogicalValue(context.Context, string, []byte) error
+	ReplaceLogicalValues(context.Context, []LogicalValue, bool) (bool, error)
 	ValueKey(string) []byte
 	HashKey(name, field string) []byte
 	HashPrefix(name string) []byte
@@ -156,11 +167,25 @@ func (store dbProtocol) DeleteLogicalKey(ctx context.Context, key string) (bool,
 	return store.db.deleteLogicalKey(ctx, key)
 }
 
+func (store dbProtocol) DeleteLogicalKeys(ctx context.Context, keys [][]byte) (int, error) {
+	if err := store.db.ensureOpen(); err != nil {
+		return 0, err
+	}
+	return store.db.deleteLogicalKeys(ctx, keys)
+}
+
 func (store dbProtocol) ReplaceLogicalValue(ctx context.Context, key string, encoded []byte) error {
 	if err := store.db.ensureOpen(); err != nil {
 		return err
 	}
 	return store.db.replaceLogicalValue(ctx, key, encoded)
+}
+
+func (store dbProtocol) ReplaceLogicalValues(ctx context.Context, values []LogicalValue, onlyIfAbsent bool) (bool, error) {
+	if err := store.db.ensureOpen(); err != nil {
+		return false, err
+	}
+	return store.db.replaceLogicalValues(ctx, values, onlyIfAbsent)
 }
 
 func (store dbProtocol) ValueKey(key string) []byte {

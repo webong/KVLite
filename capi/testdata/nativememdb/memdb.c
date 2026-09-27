@@ -425,7 +425,7 @@ static const kvlite_module_info_v1 memdb_info = {
     KVLITE_TEST_DRIVER_NAME,
     "v0.1.0",
     KVLITE_TEST_DRIVER_NAME,
-    "embedded-storage"
+    "embedded-storage,atomic-batch"
 };
 
 int kvlite_module_init_v1(const kvlite_host_api_v1 *host, char **out_error) {

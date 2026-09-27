@@ -26,8 +26,9 @@ its listener open. It resumes requests when the owner restarts at the same
 URL. If one `kvlite serve` command launched both processes, the CLI stops
 Redis when the owner exits.
 
-Attached multi-step commands are not atomic (each record operation crosses
-the transport separately). In Go, `Serve` owns an embedded database while
+Attached `MSET`, `MSETNX`, and multi-key `DEL` commit one batch at the HTTP
+owner. Other read-modify-write commands still cross several requests and are
+not atomic across clients. In Go, `Serve` owns an embedded database while
 `ServeRemote` serves from a remote handle such as `kvlitehttp.Connect`:
 
 ```go
@@ -83,8 +84,8 @@ log.Printf("Redis endpoint: %s", server.URL())
 ```
 
 `Server.Close` stops only the RESP listener and active client connections; it
-does not close the caller-owned DB. A Redis server may only be attached to an
-embedded DB, never to a remote HTTP client handle.
+does not close the caller-owned DB. Use `Serve` for an embedded owner and
+`ServeRemote` for a handle returned by `kvlitehttp.Connect`.
 
 The extension supports the everyday string, TTL, hash, set, list, increment,
 key-discovery, and common handshake commands used by standard Redis clients.

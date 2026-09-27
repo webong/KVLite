@@ -31,7 +31,7 @@ func TestDiscoverModulesAndVerifyArtifacts(t *testing.T) {
 		Version:       "v0.1.0",
 		ModuleABI:     ModuleABIVersion,
 		Driver:        DriverRocksDB,
-		Capabilities:  []string{"embedded-storage", "ttl-compaction"},
+		Capabilities:  []string{"embedded-storage", ModuleCapabilityAtomicBatch, "ttl-compaction"},
 		Artifacts: []ModuleArtifact{{
 			Platform: runtime.GOOS + "-" + runtime.GOARCH,
 			Kind:     ModuleArtifactCShared,
@@ -96,6 +96,7 @@ func TestModuleKindSeparatesEngineAndTransport(t *testing.T) {
 	engine := testExtensionManifest("rocksdb")
 	engine.Kind = ModuleKindEngine
 	engine.Driver = DriverRocksDB
+	engine.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch}
 	if err := engine.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +114,20 @@ func TestModuleKindSeparatesEngineAndTransport(t *testing.T) {
 	}
 }
 
+func TestEngineModuleRequiresAtomicBatchCapability(t *testing.T) {
+	manifest := testExtensionManifest("legacy-engine")
+	manifest.Kind = ModuleKindEngine
+	manifest.Driver = "legacy-engine"
+	manifest.Capabilities = []string{"embedded-storage"}
+	if err := manifest.Validate(); !errors.Is(err, ErrModuleIncompatible) {
+		t.Fatalf("legacy engine Validate() = %v, want ErrModuleIncompatible", err)
+	}
+	manifest.Capabilities = append(manifest.Capabilities, "atomic-batch")
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("atomic engine Validate() = %v", err)
+	}
+}
+
 func TestMultiKindExtensionProvidesEngineAndTransport(t *testing.T) {
 	root := t.TempDir()
 	manifest := testExtensionManifest("combo")
@@ -120,6 +135,7 @@ func TestMultiKindExtensionProvidesEngineAndTransport(t *testing.T) {
 	manifest.Kind = ""
 	manifest.Kinds = []ModuleKind{ModuleKindEngine, ModuleKindTransport}
 	manifest.Driver = "combo-engine"
+	manifest.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch, "network-server"}
 	manifest.Artifacts = []ModuleArtifact{
 		{Platform: runtime.GOOS + "-" + runtime.GOARCH, Kind: ModuleArtifactCShared, Path: "lib/engine.test"},
 		{Platform: runtime.GOOS + "-" + runtime.GOARCH, Kind: ModuleArtifactExecutable, Path: "bin/transport.test"},
@@ -177,6 +193,7 @@ func TestResolveModuleForDriverRejectsDuplicateClaims(t *testing.T) {
 		manifest.Kind = ""
 		manifest.Kinds = []ModuleKind{ModuleKindEngine, ModuleKindTransport}
 		manifest.Driver = "same-engine"
+		manifest.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch, "network-server"}
 		writeTestModuleManifest(t, filepath.Join(root, name), manifest)
 	}
 	t.Setenv("KVLITE_MODULE_PATH", root)
@@ -193,6 +210,7 @@ func TestMultiKindManifestRejectsInvalidDeclarations(t *testing.T) {
 	valid.Kind = ""
 	valid.Kinds = []ModuleKind{ModuleKindEngine, ModuleKindTransport}
 	valid.Driver = "combo-engine"
+	valid.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch, "network-server"}
 	for _, test := range []struct {
 		name   string
 		mutate func(*ModuleManifest)
@@ -220,6 +238,7 @@ func TestLegacyModuleKindsNormalizeOnDiscovery(t *testing.T) {
 	engine := testExtensionManifest("old-engine")
 	engine.Kind = "driver"
 	engine.Driver = "old-engine"
+	engine.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch}
 	writeTestModuleManifest(t, filepath.Join(root, engine.Name), engine)
 	transport := testExtensionManifest("old-transport")
 	transport.Kind = "extension"
@@ -445,6 +464,7 @@ func TestGroupedCatalogRootDiscoversDriversAndModules(t *testing.T) {
 	engine := testExtensionManifest("leveldb")
 	engine.Kind = ModuleKindEngine
 	engine.Driver = DriverLevelDB
+	engine.Capabilities = []string{"embedded-storage", ModuleCapabilityAtomicBatch}
 	writeTestModuleManifest(t, filepath.Join(root, "drivers", "leveldb"), engine)
 	writeTestModuleManifest(t, filepath.Join(root, "modules", "http"), testExtensionManifest("http"))
 	modules, err := DiscoverModules(root)

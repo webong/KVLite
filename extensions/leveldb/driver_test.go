@@ -16,6 +16,10 @@ func TestAtomicMutations(t *testing.T) {
 	enginetest.RunAtomicMutations(t, kvlite.DriverLevelDB)
 }
 
+func TestProcessExitRecovery(t *testing.T) {
+	enginetest.RunProcessExitRecovery(t, kvlite.DriverLevelDB)
+}
+
 func TestLevelDBDriverOpensAndPersistsKVLiteRecords(t *testing.T) {
 	if got := kvlite.DefaultDriver(); got != kvlite.DriverLevelDB {
 		t.Fatalf("DefaultDriver() = %q, want %q", got, kvlite.DriverLevelDB)

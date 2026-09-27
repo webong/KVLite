@@ -21,6 +21,10 @@ func TestAtomicMutations(t *testing.T) {
 	enginetest.RunAtomicMutations(t, kvlite.DriverLMDB)
 }
 
+func TestProcessExitRecovery(t *testing.T) {
+	enginetest.RunProcessExitRecovery(t, kvlite.DriverLMDB)
+}
+
 func TestDriverPersistsCollectionsAndRecords(t *testing.T) {
 	path := t.TempDir()
 	ctx := context.Background()

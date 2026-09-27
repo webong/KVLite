@@ -24,7 +24,7 @@ version `1` declares one kind; module ABI version `1` requires at least:
   "version": "v0.1.0",
   "module_abi": 1,
   "driver": "rocksdb",
-  "capabilities": ["embedded-storage", "ttl-compaction"],
+  "capabilities": ["embedded-storage", "atomic-batch", "ttl-compaction"],
   "license": "Apache-2.0",
   "artifacts": [
     {
@@ -42,6 +42,13 @@ Artifact paths are relative to the manifest, checksums are SHA-256, and a
 module name can only appear once in a discovery set. Unknown manifest fields,
 path traversal, incompatible module ABI versions, and duplicate module names
 are rejected.
+
+Engine modules must advertise `atomic-batch`. Module ABI 1 identifies the
+registration layout; the capability identifies the required ordered,
+all-or-nothing record operation. A pre-batch engine manifest is rejected with
+`ErrModuleIncompatible` before its library is loaded. Current C-shared bundles
+must export `kvlite_raw_apply`; pure-C native modules must export
+`kvlite_module_apply_v1`. Transport-only modules do not need this capability.
 
 `kind` describes what a v1 extension provides, not its implementation type:
 `engine` adds storage and must name its KVLite `driver`; `transport` exposes a
@@ -154,13 +161,16 @@ topology instead: one `kvlite-http` owner holds the single writable copy of
 the directory, and `kvlite-redis --upstream <owner-url>` attaches to it over
 the owner's loopback HTTP protocol. The owner must be available for attached
 processes; per-command failures (owner down, token rejected) surface as Redis
-`ERR` replies without stopping the server. Attached multi-step commands are
-not atomic — each record operation crosses the transport separately — so use a
-direct owner when commands must observe one coherent snapshot.
+`ERR` replies without stopping the server. Owner-side batch routes cover the
+multi-key writes named below; other attached read-modify-write commands still
+cross multiple requests. Use a direct owner when those commands must observe
+one coherent snapshot.
 
-The Go HTTP client has owner-side routes for scalar replacement, list pushes,
-set add/remove, and hash-field deletion. Other composed client operations and
-attached Redis commands still need owner-side execution before they can claim
+The Go HTTP client has owner-side routes for scalar and multi-key replacement,
+multi-key deletion, list pushes, set add/remove, and hash-field deletion.
+Attached Redis `MSET`, `MSETNX`, and multi-key `DEL` use these routes and commit
+one engine batch. Other composed operations, such as read-modify-write commands
+and multi-key reads, still need owner-side execution before they can claim
 cross-client atomicity.
 
 When started separately, attached Redis stays up during an owner outage and

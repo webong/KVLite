@@ -35,6 +35,8 @@ ultimately install prebuilt module artifacts rather than compile KVLite.
   namespaces.
 - Ordered atomic mutation batches required of every engine driver, so a
   rejected logical replacement cannot leave a half-deleted collection.
+- Engine module manifests advertise the required `atomic-batch` capability;
+  pre-batch bundles fail compatibility checks before loading.
 - An optional authenticated HTTP owner/client extension where clients select a
   server-exposed driver name, never a filesystem path.
 - A RocksDB compaction filter that physically discards expired value envelopes;
@@ -462,16 +464,19 @@ need the same database.
 | Node.js | `@webong/kvlite` | N-API dynamic loader | `fetch` |
 | Rust | `kvlite` | `libloading` | Use the OpenAPI or Redis client boundary |
 
-For now, build/download the matching native release and set
-`KVLITE_LIBRARY_PATH` to `libkvlite` before calling `open()`. Embedded wrappers
+For now, build/download and install one matching driver bundle before calling
+`open()`. Embedded wrappers discover the same installed driver catalog as the
+CLI through `KVLITE_SYSTEM_MODULE_PATH`, or automatically from standard
+`~/.local/lib/kvlite` and `/usr/local/lib/kvlite` locations. An explicit
+`KVLITE_LIBRARY_PATH` remains available for custom layouts. Embedded wrappers
 use their bundle's default driver unless given an optional driver name (for
 example, `leveldb`); remote `connect()` clients may send a driver selection
 that the server validates against its
 server-owned mappings. The wrapper packages intentionally do not make a second
-copy of RocksDB. They can already be tested
-without RocksDB using an ABI-compatible mock; publishing self-contained package
-installers waits for the native release bundle to include RocksDB and its
-compression libraries with correct loader paths and notices.
+copy of RocksDB. They can already be tested without RocksDB using an
+ABI-compatible mock. Release CI assembles a self-contained RocksDB runtime
+bundle on Linux and macOS; registry package publication and verification of
+a real release remain ahead.
 
 Run the real native integration check (build `libkvlite` against the pinned
 RocksDB container, then load it through Python `ctypes`) with:

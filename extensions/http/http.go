@@ -430,6 +430,74 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /v1/logical/replace-many", func(w http.ResponseWriter, request *http.Request) {
+		database, ok := resolveSharedDatabase(databases, w, request)
+		if !ok {
+			return
+		}
+		request.Body = http.MaxBytesReader(w, request.Body, options.MaxRequestBytes)
+		var command struct {
+			Values       []kvlite.LogicalValue `json:"values"`
+			OnlyIfAbsent bool                  `json:"only_if_absent"`
+		}
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&command); err != nil {
+			http.Error(w, "invalid or oversized logical replacement", http.StatusBadRequest)
+			return
+		}
+		var extra any
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "logical replacement has trailing data", http.StatusBadRequest)
+			return
+		}
+		store := database.Protocol()
+		store.Lock()
+		applied, err := store.ReplaceLogicalValues(request.Context(), command.Values, command.OnlyIfAbsent)
+		store.Unlock()
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, kvlite.ErrInvalidArgument) {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Applied bool `json:"applied"`
+		}{Applied: applied})
+	})
+	mux.HandleFunc("POST /v1/logical/delete-many", func(w http.ResponseWriter, request *http.Request) {
+		database, ok := resolveSharedDatabase(databases, w, request)
+		if !ok {
+			return
+		}
+		request.Body = http.MaxBytesReader(w, request.Body, options.MaxRequestBytes)
+		var keys [][]byte
+		decoder := json.NewDecoder(request.Body)
+		if err := decoder.Decode(&keys); err != nil {
+			http.Error(w, "invalid or oversized logical deletion", http.StatusBadRequest)
+			return
+		}
+		var extra any
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "logical deletion has trailing data", http.StatusBadRequest)
+			return
+		}
+		store := database.Protocol()
+		store.Lock()
+		deleted, err := store.DeleteLogicalKeys(request.Context(), keys)
+		store.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Deleted int `json:"deleted"`
+		}{Deleted: deleted})
+	})
 	mux.HandleFunc("GET /v1/scan", func(w http.ResponseWriter, request *http.Request) {
 		database, ok := resolveSharedDatabase(databases, w, request)
 		if !ok {
@@ -997,6 +1065,53 @@ func (engine *remoteEngine) ReplaceLogicalValue(ctx context.Context, key string,
 		return remoteMutationError(response, "logical replacement")
 	}
 	return nil
+}
+
+func (engine *remoteEngine) ReplaceLogicalValues(ctx context.Context, values []kvlite.LogicalValue, onlyIfAbsent bool) (bool, error) {
+	payload, err := json.Marshal(struct {
+		Values       []kvlite.LogicalValue `json:"values"`
+		OnlyIfAbsent bool                  `json:"only_if_absent"`
+	}{Values: values, OnlyIfAbsent: onlyIfAbsent})
+	if err != nil {
+		return false, err
+	}
+	response, err := engine.request(ctx, http.MethodPost, "/v1/logical/replace-many", bytes.NewReader(payload))
+	if err != nil {
+		return false, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return false, remoteMutationError(response, "multi-key replacement")
+	}
+	var result struct {
+		Applied bool `json:"applied"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return false, err
+	}
+	return result.Applied, nil
+}
+
+func (engine *remoteEngine) DeleteLogicalKeys(ctx context.Context, keys [][]byte) (int, error) {
+	payload, err := json.Marshal(keys)
+	if err != nil {
+		return 0, err
+	}
+	response, err := engine.request(ctx, http.MethodPost, "/v1/logical/delete-many", bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return 0, remoteMutationError(response, "multi-key deletion")
+	}
+	var result struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+	return result.Deleted, nil
 }
 
 func remoteMutationError(response *http.Response, operation string) error {
