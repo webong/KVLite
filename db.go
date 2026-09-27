@@ -182,6 +182,8 @@ func (db *DB) put(ctx context.Context, key []byte, value any, options ...PutOpti
 	if len(key) == 0 {
 		return fmt.Errorf("%w: key is required", ErrInvalidArgument)
 	}
+	db.protocolMu.Lock()
+	defer db.protocolMu.Unlock()
 	encoded, err := db.encodeValue(value, options...)
 	if err != nil {
 		return err

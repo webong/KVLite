@@ -481,9 +481,9 @@ write_extension_manifest() {
   fi
   if [[ -z "$capabilities_json" ]]; then
     if [[ "$extension" == "http" ]]; then
-      capabilities_json='["http-client", "http-server", "remote-driver-selection"]'
+      capabilities_json='["http-client", "http-server", "remote-driver-selection", "conditional-batch"]'
     else
-      capabilities_json='["redis-resp2", "redis-server"]'
+      capabilities_json='["redis-resp2", "redis-server", "atomic-commands"]'
     fi
   fi
   [[ -n "$license" ]] || license="Apache-2.0"

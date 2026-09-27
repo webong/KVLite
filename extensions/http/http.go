@@ -41,7 +41,7 @@ func Manifest() kvlite.ModuleManifest {
 		Kind:          kvlite.ModuleKindTransport,
 		Version:       "v0.1.0",
 		ModuleABI:     kvlite.ModuleABIVersion,
-		Capabilities:  []string{"http-client", "http-server", "remote-driver-selection"},
+		Capabilities:  []string{"http-client", "http-server", "remote-driver-selection", "conditional-batch"},
 		License:       "Apache-2.0",
 	}
 }
@@ -401,6 +401,39 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /v1/atomic/batch", func(w http.ResponseWriter, request *http.Request) {
+		database, ok := resolveSharedDatabase(databases, w, request)
+		if !ok {
+			return
+		}
+		request.Body = http.MaxBytesReader(w, request.Body, options.MaxRequestBytes)
+		var batch kvlite.ConditionalBatch
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&batch); err != nil {
+			http.Error(w, "invalid or oversized conditional batch", http.StatusBadRequest)
+			return
+		}
+		var extra any
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			http.Error(w, "conditional batch has trailing data", http.StatusBadRequest)
+			return
+		}
+		committer := database.Protocol().(kvlite.ConditionalBatchStore)
+		applied, err := committer.CompareAndApply(request.Context(), batch)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, kvlite.ErrInvalidArgument) {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Applied bool `json:"applied"`
+		}{Applied: applied})
+	})
 	mux.HandleFunc("PUT /v1/logical/{key}", func(w http.ResponseWriter, request *http.Request) {
 		database, ok := resolveSharedDatabase(databases, w, request)
 		if !ok {
@@ -509,6 +542,8 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 			return
 		}
 		items := make([]scanItem, 0)
+		store := database.Protocol()
+		store.Lock()
 		err = database.Transport().ScanPrefix(request.Context(), prefix, func(key, value []byte) error {
 			items = append(items, scanItem{
 				Key:   base64.RawStdEncoding.EncodeToString(key),
@@ -516,6 +551,7 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 			})
 			return nil
 		})
+		store.Unlock()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -544,7 +580,10 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		store := database.Protocol()
+		store.Lock()
 		length, err := database.Transport().PushList(request.Context(), key, newItems, request.URL.Query().Get("left") == "1")
+		store.Unlock()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -931,6 +970,28 @@ func (engine *remoteEngine) Apply(ctx context.Context, mutations []kvlite.Mutati
 		return remoteMutationError(response, "batch")
 	}
 	return nil
+}
+
+func (engine *remoteEngine) CompareAndApply(ctx context.Context, batch kvlite.ConditionalBatch) (bool, error) {
+	payload, err := json.Marshal(batch)
+	if err != nil {
+		return false, err
+	}
+	response, err := engine.request(ctx, http.MethodPost, "/v1/atomic/batch", bytes.NewReader(payload))
+	if err != nil {
+		return false, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return false, remoteMutationError(response, "conditional batch")
+	}
+	var result struct {
+		Applied bool `json:"applied"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return false, err
+	}
+	return result.Applied, nil
 }
 
 func (engine *remoteEngine) ScanPrefix(ctx context.Context, prefix []byte, callback func(key, value []byte) error) error {

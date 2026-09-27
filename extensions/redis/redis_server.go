@@ -32,7 +32,7 @@ func Manifest() kvlite.ModuleManifest {
 		Kind:          kvlite.ModuleKindTransport,
 		Version:       "v0.1.0",
 		ModuleABI:     kvlite.ModuleABIVersion,
-		Capabilities:  []string{"redis-resp2", "redis-server"},
+		Capabilities:  []string{"redis-resp2", "redis-server", "atomic-commands"},
 		License:       "Apache-2.0",
 	}
 }
@@ -92,10 +92,10 @@ func Serve(db *kvlite.DB, options Options) (*Server, error) {
 // the only process allowed to open that directory; this server translates
 // RESP commands into the owner's record protocol.
 //
-// Remote multi-step commands are not atomic: each record operation crosses
-// the transport separately. Use Serve against an embedded owner when commands
-// must observe one coherent snapshot. Closing the server never closes the
-// caller-owned remote handle.
+// Remote commands use owner-validated observations and one conditional batch,
+// so their reads and writes are atomic across attached clients. An older HTTP
+// owner without conditional batches returns a compatibility error. Closing the
+// server never closes the caller-owned remote handle.
 func ServeRemote(db *kvlite.DB, options Options) (*Server, error) {
 	if db == nil {
 		return nil, fmt.Errorf("%w: database is required", kvlite.ErrInvalidArgument)
@@ -108,7 +108,9 @@ func ServeRemote(db *kvlite.DB, options Options) (*Server, error) {
 		return nil, err
 	}
 	server.wg.Add(1)
-	go server.acceptLoop(newDatabase(db.Protocol()), options)
+	redisDB := newDatabase(db.Protocol())
+	redisDB.remoteAtomic = true
+	go server.acceptLoop(redisDB, options)
 	return server, nil
 }
 
@@ -240,9 +242,15 @@ func serveRedisConnection(db *database, conn net.Conn, password string, session 
 			}
 			continue
 		}
-		db.store.Lock()
-		reply, quit := db.redisDispatch(args, password, session)
-		db.store.Unlock()
+		var reply respValue
+		var quit bool
+		if db.remoteAtomic {
+			reply, quit = db.redisDispatchRemoteAtomic(args, password, session)
+		} else {
+			db.store.Lock()
+			reply, quit = db.redisDispatch(args, password, session)
+			db.store.Unlock()
+		}
 		if err := writeRedisReply(writer, reply); err != nil {
 			return
 		}

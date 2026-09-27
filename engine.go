@@ -49,6 +49,7 @@ var errAtomicHashDeleteUnsupported = errors.New("kvlite: engine does not support
 var errAtomicReplaceUnsupported = errors.New("kvlite: engine does not support atomic logical replacement")
 var errAtomicMultiReplaceUnsupported = errors.New("kvlite: engine does not support atomic multi-key replacement")
 var errAtomicMultiDeleteUnsupported = errors.New("kvlite: engine does not support atomic multi-key deletion")
+var errConditionalBatchUnsupported = errors.New("kvlite: engine does not support conditional batches")
 
 // guardedEngine keeps Close from racing an in-flight backend call. The DB's
 // higher-level closed flag provides friendlier early errors; this guard owns
@@ -213,6 +214,21 @@ func (engine *guardedEngine) DeleteLogicalKeys(ctx context.Context, keys [][]byt
 		return 0, errAtomicMultiDeleteUnsupported
 	}
 	return remote.DeleteLogicalKeys(ctx, keys)
+}
+
+func (engine *guardedEngine) CompareAndApply(ctx context.Context, batch ConditionalBatch) (bool, error) {
+	engine.mu.RLock()
+	defer engine.mu.RUnlock()
+	if engine.closed {
+		return false, ErrClosed
+	}
+	remote, ok := engine.inner.(interface {
+		CompareAndApply(context.Context, ConditionalBatch) (bool, error)
+	})
+	if !ok {
+		return false, errConditionalBatchUnsupported
+	}
+	return remote.CompareAndApply(ctx, batch)
 }
 
 func (engine *guardedEngine) Close() error {

@@ -67,6 +67,8 @@ func (db *DB) HGetAll(ctx context.Context, name string, target any) error {
 	if err := db.ensureOpen(); err != nil {
 		return err
 	}
+	db.protocolMu.Lock()
+	defer db.protocolMu.Unlock()
 	targetValue := reflect.ValueOf(target)
 	if targetValue.Kind() != reflect.Pointer || targetValue.IsNil() || targetValue.Elem().Kind() != reflect.Map || targetValue.Elem().Type().Key().Kind() != reflect.String {
 		return fmt.Errorf("%w: HGetAll target must be a non-nil pointer to map[string]T", ErrInvalidArgument)
@@ -192,6 +194,8 @@ func (db *DB) SMembers(ctx context.Context, name string) ([]string, error) {
 	if err := db.ensureOpen(); err != nil {
 		return nil, err
 	}
+	db.protocolMu.Lock()
+	defer db.protocolMu.Unlock()
 	prefix := namespacePrefix(kindSet, name)
 	var members []string
 	err := db.engine.ScanPrefix(ctx, prefix, func(key, _ []byte) error {
@@ -216,6 +220,8 @@ func (db *DB) push(ctx context.Context, name string, left bool, values ...any) (
 	if err := db.ensureOpen(); err != nil {
 		return 0, err
 	}
+	db.protocolMu.Lock()
+	defer db.protocolMu.Unlock()
 	key := listKey(name)
 	encoded := make([][]byte, 0, len(values))
 	for _, value := range values {

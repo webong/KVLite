@@ -4,6 +4,6 @@
   "kind": "transport",
   "version": "v0.1.0",
   "module_abi": 1,
-  "capabilities": ["redis-resp2", "redis-server"],
+  "capabilities": ["redis-resp2", "redis-server", "atomic-commands"],
   "license": "Apache-2.0"
 }

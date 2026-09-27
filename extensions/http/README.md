@@ -63,9 +63,10 @@ The Go HTTP client sends scalar and multi-key replacement, multi-key deletion,
 calls to the set and hash mutations receive correct added/removed counts;
 reads do not see a gap during scalar replacement. List pushes also use an
 owner-side operation. Attached Redis `MSET`, `MSETNX`, and multi-key `DEL` use
-one owner-side batch. Other multi-step remote operations, including Redis
-read-modify-write commands, are not yet atomic across clients; do not treat
-the whole transport as a transactional API.
+one owner-side batch. The conditional-batch route also validates point reads
+and complete prefix scans before one batch commit, so the attached Redis
+extension can retry read-modify-write and multi-key read commands on conflicts.
+Arbitrary multi-call Go HTTP clients do not become transactional automatically.
 Newer clients require an owner with these routes; an older owner reports a
 module-incompatibility error for unsupported mutations.
 

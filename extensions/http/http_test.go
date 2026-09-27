@@ -241,6 +241,41 @@ func TestRemoteLogicalMultiKeyOperationsCommitAtOwner(t *testing.T) {
 	}
 }
 
+func TestRemoteConditionalBatchValidatesReadOnlyAndWriteCommands(t *testing.T) {
+	owner, server := openTestOwner(t, Options{ListenAddress: "127.0.0.1:0"})
+	remote, err := Connect(server.URL(), ClientOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remote.Close() })
+	ctx := context.Background()
+	key := []byte{0xff, 0, 'k'}
+	if err := owner.Transport().Put(ctx, key, []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	committer := remote.Protocol().(kvlite.ConditionalBatchStore)
+	batch := kvlite.ConditionalBatch{
+		Reads:     []kvlite.ObservedRecord{{Key: key, Value: []byte("old"), Found: true}},
+		Mutations: []kvlite.Mutation{{Key: key, Value: []byte("new")}},
+	}
+	if applied, err := committer.CompareAndApply(ctx, batch); err != nil || !applied {
+		t.Fatalf("first conditional batch = %t, %v", applied, err)
+	}
+	if applied, err := committer.CompareAndApply(ctx, batch); err != nil || applied {
+		t.Fatalf("stale conditional batch = %t, %v", applied, err)
+	}
+	readOnly := kvlite.ConditionalBatch{Prefixes: []kvlite.ObservedPrefix{{Prefix: []byte{0xff}, Records: []kvlite.RawRecord{{Key: key, Value: []byte("new")}}}}}
+	if applied, err := committer.CompareAndApply(ctx, readOnly); err != nil || !applied {
+		t.Fatalf("read-only validation = %t, %v", applied, err)
+	}
+	if err := owner.Transport().Put(ctx, []byte{0xff, 1}, []byte("other")); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := committer.CompareAndApply(ctx, readOnly); err != nil || applied {
+		t.Fatalf("stale prefix validation = %t, %v", applied, err)
+	}
+}
+
 func TestServeAndConnectAreExplicitExtensions(t *testing.T) {
 	secondaryPath := t.TempDir()
 	const redisURL = "redis://127.0.0.1:6379"
@@ -610,6 +645,10 @@ func TestRemoteMutationExplainsOlderOwner(t *testing.T) {
 	}
 	if _, err := remote.Protocol().DeleteLogicalKeys(context.Background(), [][]byte{[]byte("key")}); !errors.Is(err, kvlite.ErrModuleIncompatible) {
 		t.Fatalf("delete-many against an older owner = %v, want ErrModuleIncompatible", err)
+	}
+	committer := remote.Protocol().(kvlite.ConditionalBatchStore)
+	if _, err := committer.CompareAndApply(context.Background(), kvlite.ConditionalBatch{}); !errors.Is(err, kvlite.ErrModuleIncompatible) {
+		t.Fatalf("conditional batch against an older owner = %v, want ErrModuleIncompatible", err)
 	}
 }
 

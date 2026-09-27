@@ -161,17 +161,21 @@ topology instead: one `kvlite-http` owner holds the single writable copy of
 the directory, and `kvlite-redis --upstream <owner-url>` attaches to it over
 the owner's loopback HTTP protocol. The owner must be available for attached
 processes; per-command failures (owner down, token rejected) surface as Redis
-`ERR` replies without stopping the server. Owner-side batch routes cover the
-multi-key writes named below; other attached read-modify-write commands still
-cross multiple requests. Use a direct owner when those commands must observe
-one coherent snapshot.
+`ERR` replies without stopping the server. Attached Redis stages each storage
+command locally, then asks the HTTP owner to validate its point reads and
+prefix scans and commit one ordered batch. A changed observation retries the
+command; after bounded contention it returns `TRYAGAIN` without writing.
 
 The Go HTTP client has owner-side routes for scalar and multi-key replacement,
 multi-key deletion, list pushes, set add/remove, and hash-field deletion.
-Attached Redis `MSET`, `MSETNX`, and multi-key `DEL` use these routes and commit
-one engine batch. Other composed operations, such as read-modify-write commands
-and multi-key reads, still need owner-side execution before they can claim
-cross-client atomicity.
+Its conditional-batch route lets all currently supported attached Redis
+storage commands, including read-modify-write commands and multi-key reads,
+observe one owner-validated snapshot across clients. Prefix scans such as
+`KEYS`, `SCAN`, and `FLUSHDB` validate their complete raw scan and can be
+expensive on large stores. This is not Redis `MULTI`/`EXEC` support or a
+transactional guarantee for arbitrary multi-call Go HTTP clients. An older
+HTTP owner without the conditional-batch route returns a module-compatibility
+error instead of silently executing a non-atomic command.
 
 When started separately, attached Redis stays up during an owner outage and
 resumes requests if the owner restarts at the same URL. When the CLI starts

@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,6 +71,10 @@ func (engine *redisTestEngine) Apply(ctx context.Context, mutations []kvlite.Mut
 	}
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
+	return engine.applyLocked(mutations)
+}
+
+func (engine *redisTestEngine) applyLocked(mutations []kvlite.Mutation) error {
 	engine.applyCount++
 	if engine.applyError != nil || (engine.failOnApply > 0 && engine.applyCount == engine.failOnApply) {
 		if engine.applyError == nil {
@@ -84,6 +90,52 @@ func (engine *redisTestEngine) Apply(ctx context.Context, mutations []kvlite.Mut
 		}
 	}
 	return nil
+}
+
+func (engine *redisTestEngine) CompareAndApply(ctx context.Context, batch kvlite.ConditionalBatch) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	for _, read := range batch.Reads {
+		value, found := engine.values[string(read.Key)]
+		if found != read.Found || (found && !bytes.Equal(value, read.Value)) {
+			return false, nil
+		}
+	}
+	for _, prefix := range batch.Prefixes {
+		expected := make(map[string][]byte, len(prefix.Records))
+		for _, record := range prefix.Records {
+			expected[string(record.Key)] = record.Value
+		}
+		matched := 0
+		for key, value := range engine.values {
+			if !bytes.HasPrefix([]byte(key), prefix.Prefix) {
+				continue
+			}
+			want, found := expected[key]
+			if !found || !bytes.Equal(value, want) {
+				return false, nil
+			}
+			matched++
+		}
+		if matched != len(expected) {
+			return false, nil
+		}
+	}
+	if len(batch.Mutations) == 0 {
+		return true, nil
+	}
+	for _, mutation := range batch.Mutations {
+		if len(mutation.Key) == 0 {
+			return false, kvlite.ErrInvalidArgument
+		}
+	}
+	if err := engine.applyLocked(batch.Mutations); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func TestRedisMultiKeyWritesUseOneBatch(t *testing.T) {
@@ -219,6 +271,199 @@ func TestAttachedRedisMultiKeyWritesUseOwnerBatch(t *testing.T) {
 	assertRedisInteger(t, client.do(t, "DEL", binaryKey, "ascii"), 2)
 }
 
+func openAttachedRedisPair(t *testing.T) (*redisTestEngine, *redisTestClient, *redisTestClient) {
+	t.Helper()
+	storage := newRedisTestEngine()
+	owner, err := kvlite.OpenWithEngine(storage, kvlite.BackendRocksDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+	httpServer, err := kvlitehttp.Serve(owner, kvlitehttp.Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = httpServer.Close() })
+	clients := make([]*redisTestClient, 0, 2)
+	for range 2 {
+		remote, err := kvlitehttp.Connect(httpServer.URL(), kvlitehttp.ClientOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = remote.Close() })
+		redisServer, err := ServeRemote(remote, Options{ListenAddress: "127.0.0.1:0"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = redisServer.Close() })
+		clients = append(clients, newRedisTestClient(t, redisServer.URL()[len("redis://"):]))
+	}
+	return storage, clients[0], clients[1]
+}
+
+func TestAttachedRedisReadModifyWriteCommandsAreAtomicAcrossClients(t *testing.T) {
+	_, first, second := openAttachedRedisPair(t)
+	assertRedisSimple(t, first.do(t, "SET", "counter", "0"), "OK")
+	assertRedisInteger(t, first.do(t, "HSET", "hash", "counter", "0"), 1)
+	assertRedisInteger(t, first.do(t, "LPUSH", "list", "initial"), 1)
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for _, client := range []*redisTestClient{first, second} {
+		wg.Add(1)
+		go func(client *redisTestClient) {
+			defer wg.Done()
+			for range 20 {
+				if reply := client.do(t, "INCR", "counter"); reply.kind != respInteger {
+					results <- fmt.Errorf("INCR = %#v", reply)
+					return
+				}
+				if reply := client.do(t, "HINCRBY", "hash", "counter", "1"); reply.kind != respInteger {
+					results <- fmt.Errorf("HINCRBY = %#v", reply)
+					return
+				}
+				if reply := client.do(t, "LPUSH", "list", "item"); reply.kind != respInteger {
+					results <- fmt.Errorf("LPUSH = %#v", reply)
+					return
+				}
+			}
+			results <- nil
+		}(client)
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertRedisBulk(t, first.do(t, "GET", "counter"), "40")
+	assertRedisBulk(t, second.do(t, "HGET", "hash", "counter"), "40")
+	assertRedisInteger(t, first.do(t, "LLEN", "list"), 41)
+}
+
+func TestAttachedRedisMGetSeesOneOwnerSnapshot(t *testing.T) {
+	_, writer, reader := openAttachedRedisPair(t)
+	assertRedisSimple(t, writer.do(t, "MSET", "pair:a", "0", "pair:b", "0"), "OK")
+	finished := make(chan error, 1)
+	go func() {
+		for index := 1; index <= 40; index++ {
+			value := fmt.Sprint(index)
+			if reply := writer.do(t, "MSET", "pair:a", value, "pair:b", value); reply.kind != respSimple {
+				finished <- fmt.Errorf("MSET = %#v", reply)
+				return
+			}
+		}
+		finished <- nil
+	}()
+	for range 40 {
+		reply := reader.do(t, "MGET", "pair:a", "pair:b")
+		if reply.kind != respArray || len(reply.items) != 2 || reply.items[0].kind != respBulk || reply.items[1].kind != respBulk || !bytes.Equal(reply.items[0].data, reply.items[1].data) {
+			t.Fatalf("MGET observed a mixed snapshot: %#v", reply)
+		}
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAttachedRedisFailedReadModifyWritePreservesOldData(t *testing.T) {
+	storage, first, second := openAttachedRedisPair(t)
+	assertRedisSimple(t, first.do(t, "SET", "key", "old"), "OK")
+	assertRedisInteger(t, first.do(t, "HSET", "hash", "field", "7"), 1)
+	assertRedisInteger(t, first.do(t, "RPUSH", "list", "first", "second"), 2)
+	storage.mu.Lock()
+	storage.applyError = errors.New("injected batch failure")
+	storage.mu.Unlock()
+	for _, command := range [][]string{
+		{"GETSET", "key", "new"},
+		{"HINCRBY", "hash", "field", "1"},
+		{"LPOP", "list"},
+	} {
+		if reply := second.do(t, command...); reply.kind != respError {
+			t.Fatalf("%s = %#v, want an error", command[0], reply)
+		}
+	}
+	assertRedisBulk(t, first.do(t, "GET", "key"), "old")
+	storage.mu.Lock()
+	storage.applyError = nil
+	storage.mu.Unlock()
+	assertRedisBulk(t, first.do(t, "GET", "key"), "old")
+	assertRedisBulk(t, first.do(t, "HGET", "hash", "field"), "7")
+	list := first.do(t, "LRANGE", "list", "0", "-1")
+	if list.kind != respArray || len(list.items) != 2 || string(list.items[0].data) != "first" || string(list.items[1].data) != "second" {
+		t.Fatalf("list after failed pop = %#v", list)
+	}
+}
+
+func TestAttachedRedisUsesConditionalBatchOnEmbeddedOwner(t *testing.T) {
+	owner, err := kvlite.Open(t.TempDir(), kvlite.WithDriver("memory"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+	httpServer, err := kvlitehttp.Serve(owner, kvlitehttp.Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = httpServer.Close() })
+	remote, err := kvlitehttp.Connect(httpServer.URL(), kvlitehttp.ClientOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remote.Close() })
+	redisServer, err := ServeRemote(remote, Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = redisServer.Close() })
+	client := newRedisTestClient(t, redisServer.URL()[len("redis://"):])
+	assertRedisSimple(t, client.do(t, "SET", "value", "7"), "OK")
+	assertRedisBulk(t, client.do(t, "GETSET", "value", "8"), "7")
+	assertRedisInteger(t, client.do(t, "INCR", "value"), 9)
+	assertRedisInteger(t, client.do(t, "HSET", "hash", "field", "4"), 1)
+	assertRedisInteger(t, client.do(t, "HINCRBY", "hash", "field", "3"), 7)
+	assertRedisInteger(t, client.do(t, "SADD", "set", "one", "two"), 2)
+	assertRedisInteger(t, client.do(t, "SCARD", "set"), 2)
+	assertRedisInteger(t, client.do(t, "LPUSH", "list", "one", "two"), 2)
+	assertRedisBulk(t, client.do(t, "RPOP", "list"), "one")
+	assertRedisInteger(t, client.do(t, "EXPIRE", "value", "60"), 1)
+	assertRedisInteger(t, client.do(t, "PERSIST", "value"), 1)
+	if reply := client.do(t, "MGET", "value", "missing"); reply.kind != respArray || len(reply.items) != 2 || string(reply.items[0].data) != "9" || !reply.items[1].null {
+		t.Fatalf("MGET = %#v", reply)
+	}
+	if reply := client.do(t, "KEYS", "*"); reply.kind != respArray || len(reply.items) != 4 {
+		t.Fatalf("KEYS = %#v", reply)
+	}
+	secondRemote, err := kvlitehttp.Connect(httpServer.URL(), kvlitehttp.ClientOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondRemote.Close() })
+	secondServer, err := ServeRemote(secondRemote, Options{ListenAddress: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondServer.Close() })
+	secondClient := newRedisTestClient(t, secondServer.URL()[len("redis://"):])
+	var wg sync.WaitGroup
+	for _, attached := range []*redisTestClient{client, secondClient} {
+		wg.Add(1)
+		go func(attached *redisTestClient) {
+			defer wg.Done()
+			for range 10 {
+				if reply := attached.do(t, "INCR", "value"); reply.kind != respInteger {
+					t.Errorf("embedded owner INCR = %#v", reply)
+					return
+				}
+			}
+		}(attached)
+	}
+	wg.Wait()
+	assertRedisBulk(t, client.do(t, "GET", "value"), "29")
+	assertRedisSimple(t, client.do(t, "FLUSHDB"), "OK")
+	assertRedisInteger(t, client.do(t, "DBSIZE"), 0)
+}
+
 func TestFailedRedisSetPreservesOldCollection(t *testing.T) {
 	storage := newRedisTestEngine()
 	db, err := kvlite.OpenWithEngine(storage, kvlite.BackendRemote)
@@ -340,6 +585,16 @@ func assertRedisInteger(t *testing.T, reply respValue, want int64) {
 	t.Helper()
 	if reply.kind != respInteger || reply.value != want {
 		t.Fatalf("reply = %#v, want :%d", reply, want)
+	}
+}
+
+func TestRESPAllowsNullReplyItemsButRejectsNullCommandArguments(t *testing.T) {
+	value, err := readRESP(bufio.NewReader(strings.NewReader("*2\r\n$3\r\nGET\r\n$-1\r\n")))
+	if err != nil || len(value.items) != 2 || !value.items[1].null {
+		t.Fatalf("null array item = %#v, %v", value, err)
+	}
+	if _, err := redisCommandArgs(value); err == nil {
+		t.Fatal("null command argument unexpectedly accepted")
 	}
 }
 

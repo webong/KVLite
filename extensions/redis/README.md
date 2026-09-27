@@ -26,10 +26,20 @@ its listener open. It resumes requests when the owner restarts at the same
 URL. If one `kvlite serve` command launched both processes, the CLI stops
 Redis when the owner exits.
 
-Attached `MSET`, `MSETNX`, and multi-key `DEL` commit one batch at the HTTP
-owner. Other read-modify-write commands still cross several requests and are
-not atomic across clients. In Go, `Serve` owns an embedded database while
-`ServeRemote` serves from a remote handle such as `kvlitehttp.Connect`:
+Attached storage commands use owner-side conditional batches: point reads and
+prefix scans are validated before one ordered write batch, while read-only
+commands validate a coherent snapshot. Conflicts retry up to 16 times and
+then return `TRYAGAIN` without writing. This covers supported read-modify-write
+commands and multi-key reads across attached clients. Global scans (`KEYS`,
+`SCAN`, `DBSIZE`, `FLUSHDB`) inspect the full raw keyspace and can be expensive;
+an older HTTP owner returns an incompatibility error.
+
+A connection failure after the owner commits but before the reply arrives can
+leave that command's outcome unknown; retrying it may execute it twice. This
+is atomic command execution, not an exactly-once delivery guarantee.
+
+In Go, `Serve` owns an embedded database while `ServeRemote` serves from a
+remote handle such as `kvlitehttp.Connect`:
 
 ```go
 remote, err := kvlitehttp.Connect("http://127.0.0.1:8089", kvlitehttp.ClientOptions{

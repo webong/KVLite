@@ -26,9 +26,10 @@ var errRedisWrongType = errors.New("WRONGTYPE Operation against a key holding th
 // semantics. Keeping it private makes the only public extension entry point
 // Serve and avoids exposing RESP implementation details to embedded users.
 type database struct {
-	store  kvlite.ProtocolStore
-	engine kvlite.TransportStore
-	cfg    redisConfig
+	store        kvlite.ProtocolStore
+	engine       kvlite.TransportStore
+	cfg          redisConfig
+	remoteAtomic bool
 }
 
 type redisConfig struct {

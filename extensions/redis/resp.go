@@ -52,9 +52,6 @@ func readRESP(reader *bufio.Reader) (respValue, error) {
 			if err != nil {
 				return respValue{}, err
 			}
-			if item.null {
-				return respValue{}, fmt.Errorf("redis: null command argument")
-			}
 			items[i] = item
 		}
 		return respValue{kind: respArray, items: items}, nil

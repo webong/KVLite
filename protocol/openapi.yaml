@@ -78,6 +78,39 @@ paths:
           $ref: '#/components/responses/DriverUnavailable'
         '501':
           $ref: '#/components/responses/DriverUnavailable'
+  /v1/atomic/batch:
+    post:
+      summary: Validate observed raw records and atomically apply an ordered batch
+      description: |
+        Trusted transport route. The owner checks point reads and complete
+        prefix scans in one critical section, then commits all mutations or
+        none. A read-only request with no mutations validates a coherent
+        snapshot. Clients retry when applied is false. Keys and values are
+        binary-safe standard base64; large prefix scans may exceed the
+        configured request limit.
+      parameters:
+        - $ref: '#/components/parameters/Driver'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConditionalBatch'
+      responses:
+        '200':
+          description: Applied is false when any observation changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [applied]
+                properties:
+                  applied:
+                    type: boolean
+        '400':
+          description: Invalid or oversized conditional batch
+        '409':
+          $ref: '#/components/responses/DriverUnavailable'
   /v1/logical/replace-many:
     post:
       summary: Atomically replace several logical keys with encoded scalar records
@@ -271,6 +304,54 @@ components:
         delete:
           type: boolean
           default: false
+    ConditionalBatch:
+      type: object
+      properties:
+        reads:
+          type: array
+          items:
+            $ref: '#/components/schemas/ObservedRecord'
+        prefixes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ObservedPrefix'
+        mutations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mutation'
+    ObservedRecord:
+      type: object
+      required: [key, found]
+      properties:
+        key:
+          type: string
+          contentEncoding: base64
+        value:
+          type: [string, 'null']
+          contentEncoding: base64
+        found:
+          type: boolean
+    ObservedPrefix:
+      type: object
+      required: [prefix, records]
+      properties:
+        prefix:
+          type: [string, 'null']
+          contentEncoding: base64
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/RawRecord'
+    RawRecord:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+          contentEncoding: base64
+        value:
+          type: [string, 'null']
+          contentEncoding: base64
     Discovery:
       type: object
       required: [protocol, entries, methods, driver, backend, drivers]
