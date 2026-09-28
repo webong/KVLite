@@ -136,9 +136,14 @@ func run(args []string) int {
 				*listen,
 				*token,
 				*maxRequestBytes,
+				driverPaths.items,
 				*redisListen,
 				*redisPassword,
 			)
+		}
+		if len(driverPaths.items) > 0 && *redisListen != "" {
+			fmt.Fprintln(os.Stderr, "kvlite: --driver-path requires an HTTP listener")
+			return 2
 		}
 		if *redisListen == "" {
 			return runServeStandaloneHTTP(
@@ -154,10 +159,6 @@ func run(args []string) int {
 	}
 
 	if mode == extensionModeAuto && !isHTTPExtensionLinked() {
-		if len(driverPaths.items) > 0 {
-			fmt.Fprintln(os.Stderr, "kvlite: --driver-path requires a linked HTTP extension")
-			return 1
-		}
 		if *redisListen != "" && httpListenExplicit {
 			return runServeStandaloneBoth(
 				*path,
@@ -165,9 +166,14 @@ func run(args []string) int {
 				*listen,
 				*token,
 				*maxRequestBytes,
+				driverPaths.items,
 				*redisListen,
 				*redisPassword,
 			)
+		}
+		if len(driverPaths.items) > 0 && *redisListen != "" {
+			fmt.Fprintln(os.Stderr, "kvlite: --driver-path requires an HTTP listener")
+			return 2
 		}
 		if *redisListen != "" && !isRedisExtensionLinked() {
 			return runServeStandaloneRedis(*path, *driver, *redisListen, *redisPassword)
@@ -316,10 +322,6 @@ func runServeStandaloneHTTP(path, driver, listen, token string, maxRequestBytes 
 		fmt.Fprintln(os.Stderr, "kvlite: --listen is required in standalone HTTP mode")
 		return 2
 	}
-	if len(driverPaths) > 0 {
-		fmt.Fprintln(os.Stderr, "kvlite: --driver-path is only supported in linked HTTP mode")
-		return 2
-	}
 	args := []string{
 		"http",
 		"--path", path,
@@ -332,8 +334,24 @@ func runServeStandaloneHTTP(path, driver, listen, token string, maxRequestBytes 
 	if token != "" {
 		args = append(args, "--token", token)
 	}
+	args = appendDriverPaths(args, driverPaths)
 	fmt.Println("kvlite: starting standalone HTTP module")
 	return runModuleRun(args)
+}
+
+func appendDriverPaths(args []string, paths map[kvlite.DriverName]string) []string {
+	if len(paths) == 0 {
+		return args
+	}
+	names := make([]string, 0, len(paths))
+	for name := range paths {
+		names = append(names, string(name))
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		args = append(args, "--driver-path", name+"="+paths[kvlite.DriverName(name)])
+	}
+	return args
 }
 
 func runServeStandaloneRedis(path, driver, listen, password string) int {
@@ -366,7 +384,7 @@ func runServeStandaloneRedis(path, driver, listen, password string) int {
 // process attaches to it over the owner's loopback HTTP protocol. The owner
 // must outlive the attached process; when the attached process exits, the
 // owner is stopped and its exit status is returned.
-func runServeStandaloneBoth(path, driver, listen, token string, maxRequestBytes int64, redisListen, redisPassword string) int {
+func runServeStandaloneBoth(path, driver, listen, token string, maxRequestBytes int64, driverPaths map[kvlite.DriverName]string, redisListen, redisPassword string) int {
 	if strings.TrimSpace(path) == "" {
 		fmt.Fprintln(os.Stderr, "kvlite: --path is required")
 		return 2
@@ -391,6 +409,7 @@ func runServeStandaloneBoth(path, driver, listen, token string, maxRequestBytes 
 	if token != "" {
 		ownerArgs = append(ownerArgs, "--token", token)
 	}
+	ownerArgs = appendDriverPaths(ownerArgs, driverPaths)
 	fmt.Println("kvlite: starting standalone HTTP owner module")
 	owner, err := startModuleProcess("http", ownerArgs)
 	if err != nil {
@@ -638,6 +657,7 @@ func runDriver(args []string) int {
 		fmt.Fprintln(os.Stderr, "Usage: kvlite driver list")
 		return 2
 	}
+	seen := make(map[kvlite.DriverName]struct{})
 	for _, driver := range kvlite.Drivers() {
 		fmt.Printf("%s\tavailable=%t\timplementation=%s\tformat=%s\tversion=%s\n",
 			driver.Driver,
@@ -646,6 +666,24 @@ func runDriver(args []string) int {
 			driver.Format,
 			driver.Version,
 		)
+		seen[driver.Driver] = struct{}{}
+	}
+	modules, err := kvlite.DiscoverModules()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kvlite: %v\n", err)
+		return 1
+	}
+	for _, module := range modules {
+		if !module.Manifest.Provides(kvlite.ModuleKindEngine) {
+			continue
+		}
+		driver := module.Manifest.Driver
+		if _, linked := seen[driver]; linked {
+			continue
+		}
+		fmt.Printf("%s\tavailable=true\timplementation=%s\tformat=%s\tversion=%s\n",
+			driver, module.Manifest.Name, "installed-module", module.Manifest.Version)
+		seen[driver] = struct{}{}
 	}
 	return 0
 }
@@ -820,8 +858,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       kvlite import --path EMPTY_DIR --driver NAME [--input FILE|-]")
 	fmt.Fprintln(os.Stderr, "       kvlite driver list")
 	fmt.Fprintln(os.Stderr, "       kvlite module list|run <name> [args...]|verify [NAME]")
-	fmt.Fprintln(os.Stderr, "\nDefaults prefer linked extensions, and fall back to standalone module binaries when auto-linked extensions are missing.")
+	fmt.Fprintln(os.Stderr, "\nAuto mode uses installed standalone transport modules by default; an explicit engine-owned convenience build may link transports.")
 	fmt.Fprintln(os.Stderr, "Standalone HTTP and Redis share one database through a shared-owner topology: a kvlite-http owner holds the directory and kvlite-redis attaches over the owner's loopback protocol. Serving both together needs explicit --listen and --redis-listen ports.")
 	fmt.Fprintln(os.Stderr, "The binary can discover installed module descriptors from KVLITE_MODULE_PATH, KVLITE_HOME/{modules,drivers}, or KVLITE_SYSTEM_MODULE_PATH; listing them never loads code.")
-	fmt.Fprintln(os.Stderr, "Build a driver bundle with -tags kvlite_rocksdb,rocksdb; -tags kvlite_leveldb; -tags kvlite_badgerdb; -tags kvlite_boltdb; -tags kvlite_lmdb; or -tags kvlite_berkeleydb,berkeleydb, then inspect it with `kvlite driver list`.")
+	fmt.Fprintln(os.Stderr, "Install an engine bundle, then use --driver NAME. The host does not link engine packages; inspect installed bundles with `kvlite module list`.")
 }

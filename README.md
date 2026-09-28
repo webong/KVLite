@@ -6,8 +6,9 @@ extension contains a driver implementation. The core provides serialization,
 per-record TTLs, collections, and metadata checks; HTTP and Redis
 are transport extensions, while the C ABI is an embedded boundary. Go
 is the implementation language, not the required application language: Go and
-other languages can use thin bindings over an installed driver-specific C
-bundle, while optional server extensions provide HTTP and Redis access.
+other languages can use thin bindings over the driverless C host and separately
+installed engine bundles, while optional server extensions provide HTTP and
+Redis access.
 
 KVLite owns the logical record model: namespaced keys, value envelopes,
 serialization, expiry, and collection behavior. Each engine extension stores
@@ -54,10 +55,10 @@ use; the Go source-import path below is for building or extending KVLite itself.
 
 ## Use the distributed runtime
 
-KVLite's installed CLI and native driver bundles are the product. They are
+KVLite's installed host CLI, C library, and native driver bundles are the product. They are
 separate from the Go implementation source. Choose one storage extension when
 installing a bundle; use the CLI directly, or use a language binding that loads
-its `libkvlite` through the stable C ABI. None of these bindings imports the Go
+the host's `libkvlite` through the stable C ABI. None of these bindings imports the Go
 core module.
 
 The repository-root `github.com/webong/kvlite` module is the thin Go binding,
@@ -139,11 +140,11 @@ code. This is the normal SQLite-like path for Go and for language bindings
 using the C ABI.
 
 When an application explicitly needs cross-process access, install the
-separate extension:
+separate transport bundles:
 
 ```bash
-go get github.com/webong/kvlite/extensions/http
-go get github.com/webong/kvlite/extensions/redis
+make release-http RELEASE_VERSION=dev
+make release-redis RELEASE_VERSION=dev
 ```
 
 The standalone `kvlite serve` CLI exposes HTTP/Redis as optional extensions.
@@ -181,11 +182,12 @@ make release-http RELEASE_VERSION=v0.1.0
 make release-redis RELEASE_VERSION=v0.1.0
 ```
 
-Driver release CLIs are extension-free hosts by default (built with
-`kvlite_no_linked_extensions`): they launch a verified standalone protocol
-executable in `auto` or `standalone` mode. A standalone protocol process is a
-direct owner of its own database directory; run one standalone HTTP *or* one
-standalone Redis process per directory.
+The driverless host CLI launches verified standalone protocol executables in
+`auto` or `standalone` mode. An engine bundle can also include an executable
+linked to that one engine for direct or platform-fallback use. A standalone
+HTTP or Redis process can own a database directory. To serve both protocols
+over one directory, the CLI starts HTTP as the sole owner and attaches Redis
+through that owner's loopback endpoint.
 
 ### RocksDB driver
 
@@ -380,15 +382,19 @@ and never needs native database headers or filesystem access.
 Start the owner:
 
 ```bash
-go build -tags 'rocksdb,kvlite_rocksdb' -o kvlite ./cmd/kvlite
-./kvlite serve --driver rocksdb --path ./kvlite-data --listen 127.0.0.1:8089 --token "$KVLITE_TOKEN"
+make release RELEASE_VERSION=dev DRIVER=none
+make release RELEASE_VERSION=dev DRIVER=rocksdb
+make release-http RELEASE_VERSION=dev
+export KVLITE_HOME="$PWD/dist/dev/$(go env GOHOSTOS)-$(go env GOHOSTARCH)"
+"$KVLITE_HOME/host/bin/kvlite" serve --driver rocksdb --path ./kvlite-data --listen 127.0.0.1:8089 --token "$KVLITE_TOKEN"
 ```
 
-Inspect the compiled bundle before serving it:
+The host CLI and C library contain no engine package. They discover and verify
+the installed RocksDB bundle when opening the database. Inspect the catalog:
 
 ```bash
-./kvlite driver list
-./kvlite module list
+"$KVLITE_HOME/host/bin/kvlite" driver list
+"$KVLITE_HOME/host/bin/kvlite" module list
 ```
 
 Write and read from any shell:
@@ -415,8 +421,8 @@ maps each driver to its own path. A client may select only one of those named
 mappings; it cannot make the server open an arbitrary path:
 
 ```bash
-go build -tags 'rocksdb,kvlite_rocksdb,kvlite_leveldb' -o kvlite ./cmd/kvlite
-./kvlite serve --driver rocksdb --path ./rocks-data \
+make release RELEASE_VERSION=dev DRIVER=leveldb
+"$KVLITE_HOME/host/bin/kvlite" serve --driver rocksdb --path ./rocks-data \
   --driver-path leveldb=./level-data --listen 127.0.0.1:8089
 ```
 
@@ -430,8 +436,8 @@ endpoint. This is useful when an application already speaks Redis or when you
 want to inspect a local database with `redis-cli`:
 
 ```bash
-go build -tags 'rocksdb,kvlite_rocksdb' -o kvlite ./cmd/kvlite
-./kvlite serve \
+make release-redis RELEASE_VERSION=dev
+"$KVLITE_HOME/host/bin/kvlite" serve \
   --path ./kvlite-data \
   --driver rocksdb \
   --listen 127.0.0.1:8089 \
@@ -486,14 +492,19 @@ to a non-local interface; this endpoint does not provide TLS.
 
 ### Embedded FFI mode
 
-For a SQLite-like embedded integration, build the C-compatible shared library:
+For a SQLite-like embedded integration, build the driverless C host and an
+engine bundle:
 
 ```bash
-make build-c-shared DRIVER=leveldb
+make release RELEASE_VERSION=dev DRIVER=none
+make release RELEASE_VERSION=dev DRIVER=leveldb
 ```
 
-This produces a driver-specific `dist/libkvlite.so` bundle and the generated Go
-header. The checked-in [`capi/kvlite.h`](capi/kvlite.h) defines ABI version 1:
+The host `libkvlite` loads the installed LevelDB bundle at `open()` time. A
+driver-specific C library can still be built with
+`make build-c-shared DRIVER=leveldb` for direct loading or the Intel macOS
+fallback. The checked-in
+[`capi/kvlite.h`](capi/kvlite.h) defines ABI version 1:
 `kvlite_open` for the bundle's default driver, additive
 `kvlite_open_with_driver` (and the compatible `kvlite_open_with_backend`
 alias), close, put/get/delete, arbitrary
@@ -521,12 +532,14 @@ need the same database.
 | Node.js | `kvlite` | N-API dynamic loader | `fetch` |
 | Rust | `kvlite` | `libloading` | Use the OpenAPI or Redis client boundary |
 
-For now, build/download and install one matching driver bundle before calling
-`open()`. Embedded wrappers discover the same installed driver catalog as the
+For now, build/download and install the host plus a matching driver bundle before calling
+`open()`. Embedded wrappers prefer the host library and discover the same installed driver catalog as the
 CLI through `KVLITE_SYSTEM_MODULE_PATH`, or automatically from standard
 `~/.local/lib/kvlite` and `/usr/local/lib/kvlite` locations. An explicit
-`KVLITE_LIBRARY_PATH` remains available for custom layouts. Embedded wrappers
-use their bundle's default driver unless given an optional driver name (for
+`KVLITE_LIBRARY_PATH` remains available for custom layouts. On Intel macOS,
+non-Go bindings prefer the engine-owned library because a Go host cannot load a
+second Go runtime there; the Go binding itself cannot embed a Go-built KVLite
+library on Intel macOS. Embedded wrappers use RocksDB by default unless given an optional driver name (for
 example, `leveldb`); remote `connect()` clients may send a driver selection
 that the server validates against its
 server-owned mappings. The wrapper packages intentionally do not make a second

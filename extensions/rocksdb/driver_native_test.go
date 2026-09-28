@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	_ "github.com/webong/kvlite/extensions/rocksdb"
 	"kvlite"
 	"kvlite/enginetest"
-	_ "github.com/webong/kvlite/extensions/rocksdb"
 )
 
 func TestAtomicMutations(t *testing.T) {

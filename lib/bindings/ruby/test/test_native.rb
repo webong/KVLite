@@ -36,11 +36,15 @@ class KVLiteNativeTest < Minitest::Test
         target = File.join(root, "drivers", "leveldb", "lib", KVLite::LibraryFinder.library_name)
         FileUtils.mkdir_p(File.dirname(target))
         FileUtils.cp(library, target)
+        host = File.join(root, "lib", KVLite::LibraryFinder.library_name)
+        FileUtils.mkdir_p(File.dirname(host))
+        FileUtils.cp(library, host)
         old_home, old_override = ENV.values_at("KVLITE_HOME", "KVLITE_LIBRARY_PATH")
         begin
           ENV["KVLITE_HOME"] = root
           ENV.delete("KVLITE_LIBRARY_PATH")
-          assert_equal File.expand_path(target), KVLite::LibraryFinder.find(driver: "leveldb")
+          prefer_host = !(RbConfig::CONFIG["host_os"] =~ /darwin/ && RbConfig::CONFIG["host_cpu"] =~ /x86_64|amd64/)
+          assert_equal File.expand_path(prefer_host ? host : target), KVLite::LibraryFinder.find(driver: "leveldb")
           db = KVLite.open("mock-db", driver: "leveldb")
           assert_raises(KVLite::InvalidArgumentError) { db.put_bytes("", "value") }
           assert_raises(KVLite::InvalidArgumentError) { db.put("key", 1, ttl_seconds: -1) }

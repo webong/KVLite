@@ -18,17 +18,17 @@ Options:
   --version VERSION       Release version used in dist/VERSION (default: dev)
   --target OS-ARCH        Native target, such as darwin-arm64 (default: host)
   --driver NAME           Driver bundle: rocksdb, leveldb, badgerdb, boltdb,
-                          lmdb, berkeleydb, or "none" for a driverless host CLI (core plus the
-                          ephemeral memory engine only; default: rocksdb)
+                          lmdb, berkeleydb, or "none" for a driverless host
+                          CLI and C library (default: rocksdb)
   --extension NAME        Protocol module bundle: http or redis (mutually exclusive with --driver)
   --allow-berkeleydb      Enable Berkeley DB release bundle build. This requires an explicit
                           license-reviewed decision from the bundle owner.
   --component NAME        Build cli or c-shared; repeat to choose both (driver bundles).
                           For --extension bundles the only component is the executable
                           (cli is accepted as an alias for it).
-  --linked-extensions     Opt back into a CLI with linked HTTP/Redis extensions.
-                          By default driver CLIs are built with kvlite_no_linked_extensions
-                          so they launch verified standalone protocol executables.
+  --linked-extensions     Include HTTP/Redis in an engine-owned CLI convenience
+                          build. The driverless host always loads installed
+                          standalone protocol executables at runtime.
   --bundle-runtime        Copy non-system native runtime libraries (RocksDB,
                           compression, C++ runtime) into the bundle and rewrite
                           loader paths to the bundle. Requires at least one
@@ -142,27 +142,22 @@ fi
 
 case "$driver" in
   rocksdb)
-    build_tags="rocksdb,kvlite_rocksdb"
     native_driver=1
     is_host_bundle=0
     ;;
   leveldb)
-    build_tags="kvlite_leveldb"
     native_driver=0
     is_host_bundle=0
     ;;
   badgerdb)
-    build_tags="kvlite_badgerdb"
     native_driver=0
     is_host_bundle=0
     ;;
   boltdb)
-    build_tags="kvlite_boltdb"
     native_driver=0
     is_host_bundle=0
     ;;
   lmdb)
-    build_tags="kvlite_lmdb"
     native_driver=1
     is_host_bundle=0
     ;;
@@ -170,7 +165,6 @@ case "$driver" in
     if [[ "$allow_berkeleydb" != "1" ]]; then
       fail "Berkeley DB bundles are deliberately excluded from the standard release workflow; add --allow-berkeleydb and keep license obligations explicit"
     fi
-    build_tags="berkeleydb,kvlite_berkeleydb"
     native_driver=1
     is_host_bundle=0
     ;;
@@ -178,22 +172,14 @@ case "$driver" in
     # Driverless host: no persistent engine is linked or bundled. The CLI
     # serves memory, discovers installed drivers, and launches verified
     # protocol executables. This is the pluggable-first base artifact.
-    # --linked-extensions still applies as a dev convenience (linked
-    # protocols, still no drivers).
-    build_tags="kvlite_no_linked_extensions"
     native_driver=0
     is_host_bundle=1
     ;;
   *) fail "unsupported driver: $driver (expected rocksdb, leveldb, badgerdb, boltdb, lmdb, berkeleydb, or none)" ;;
 esac
 
-# Release driver CLIs are extension-free hosts: they launch verified standalone
-# protocol executables instead of linking HTTP/Redis. Pass --linked-extensions
-# only for an explicit development/convenience profile.
-if [[ "$linked_extensions" == "0" && "$is_host_bundle" == "0" ]]; then
-  build_tags="$build_tags,kvlite_no_linked_extensions"
-elif [[ "$linked_extensions" == "1" && "$is_host_bundle" == "1" ]]; then
-  build_tags=""
+if [[ "$linked_extensions" == "1" && "$is_host_bundle" == "1" ]]; then
+  fail "--linked-extensions requires an engine-owned CLI bundle; the driverless host stays extension-free"
 fi
 
 case "$target" in
@@ -224,12 +210,12 @@ if [[ "$is_extension_bundle" == "1" ]]; then
 else
   if [[ "$is_host_bundle" == "1" ]]; then
     if ((${#components[@]} == 0)); then
-      components=(cli)
+      components=(cli c-shared)
     fi
     for component in "${components[@]}"; do
       case "$component" in
-        cli) ;;
-        *) fail "unsupported component for a host bundle: $component (a host has no engine for a C library)" ;;
+        cli|c-shared) ;;
+        *) fail "unsupported host component: $component" ;;
       esac
     done
   else
@@ -300,9 +286,6 @@ trap cleanup EXIT
 
 cd "$repo_root"
 mkdir -p "$staging_dir/bin"
-if [[ "$is_extension_bundle" == "0" && "$is_host_bundle" == "0" ]]; then
-  mkdir -p "$staging_dir/lib" "$staging_dir/include"
-fi
 files=()
 
 has_component() {
@@ -313,6 +296,10 @@ has_component() {
   done
   return 1
 }
+
+if [[ "$is_extension_bundle" == "0" ]] && has_component c-shared; then
+  mkdir -p "$staging_dir/lib" "$staging_dir/include"
+fi
 
 if [[ "$is_extension_bundle" == "1" ]]; then
   # Protocol executables contain only core plus their protocol implementation.
@@ -327,18 +314,31 @@ if [[ "$is_extension_bundle" == "1" ]]; then
 fi
 
 if [[ "$is_extension_bundle" == "0" ]] && has_component cli; then
-  go build -tags "$build_tags" -trimpath -buildvcs=false \
-    -o "$staging_dir/bin/$executable_name" \
-    ./cmd/kvlite
+  if [[ "$is_host_bundle" == "1" ]]; then
+    go build -trimpath -buildvcs=false \
+      -o "$staging_dir/bin/$executable_name" ./cmd/kvlite
+  else
+    if [[ "$linked_extensions" == "1" ]]; then
+      bash "$script_dir/build-driver-artifact.sh" "$driver" cli \
+        "$staging_dir/bin/$executable_name" --linked-extensions
+    else
+      bash "$script_dir/build-driver-artifact.sh" "$driver" cli \
+        "$staging_dir/bin/$executable_name"
+    fi
+  fi
   files+=("bin/$executable_name")
 fi
 
 if [[ "$is_extension_bundle" == "0" ]] && has_component c-shared; then
   # Go emits a generated header beside a c-shared output. Build in a temporary
   # directory so the release ships only the reviewed, checked-in ABI header.
-  go build -tags "$build_tags" -trimpath -buildvcs=false -buildmode=c-shared \
-    -o "$temporary_dir/$library_name" \
-    ./capi
+  if [[ "$is_host_bundle" == "1" ]]; then
+    go build -trimpath -buildvcs=false -buildmode=c-shared \
+      -o "$temporary_dir/$library_name" ./capi
+  else
+    bash "$script_dir/build-driver-artifact.sh" "$driver" c-shared \
+      "$temporary_dir/$library_name"
+  fi
   cp "$temporary_dir/$library_name" "$staging_dir/lib/$library_name"
   cp "$repo_root/capi/kvlite.h" "$staging_dir/include/kvlite.h"
   files+=("lib/$library_name" "include/kvlite.h")
@@ -526,7 +526,7 @@ mv "$staging_dir" "$artifact_dir"
 if [[ "$is_extension_bundle" == "1" ]]; then
   printf 'Built KVLite %s extension module %s for %s in %s\n' "$version" "$extension" "$target" "$artifact_dir"
 elif [[ "$is_host_bundle" == "1" ]]; then
-  printf 'Built KVLite %s driverless host CLI for %s in %s\n' "$version" "$target" "$artifact_dir"
+  printf 'Built KVLite %s driverless host for %s in %s\n' "$version" "$target" "$artifact_dir"
 else
   if [[ "$linked_extensions" == "0" ]]; then
     printf 'Built KVLite %s driver module %s for %s in %s (CLI without linked extensions)\n' "$version" "$driver" "$target" "$artifact_dir"

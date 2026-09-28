@@ -17,7 +17,7 @@
       "goModule": "github.com/webong/kvlite/extensions/rocksdb",
       "sourceManifest": "../extensions/rocksdb/kvlite-module.json",
       "manifest": "kvlite-module.json",
-      "buildTags": ["rocksdb", "kvlite_rocksdb"],
+      "buildTags": ["rocksdb"],
       "native": true,
       "description": "RocksDB driver bundle; requires the packaged RocksDB runtime and notices."
     },
@@ -26,7 +26,7 @@
       "goModule": "github.com/webong/kvlite/extensions/leveldb",
       "sourceManifest": "../extensions/leveldb/kvlite-module.json",
       "manifest": "kvlite-module.json",
-      "buildTags": ["kvlite_leveldb"],
+      "buildTags": [],
       "native": false,
       "description": "Pure-Go LevelDB driver bundle."
     },
@@ -35,7 +35,7 @@
       "goModule": "github.com/webong/kvlite/extensions/berkeleydb",
       "sourceManifest": "../extensions/berkeleydb/kvlite-module.json",
       "manifest": "kvlite-module.json",
-      "buildTags": ["berkeleydb", "kvlite_berkeleydb"],
+      "buildTags": ["berkeleydb"],
       "native": true,
       "published": false,
       "description": "Berkeley DB C API extension. KVLite does not publish its native binary; the application owner supplies a separately licensed Berkeley DB library."
@@ -65,7 +65,7 @@
       "source": "cmd/kvlite",
       "kind": "executable",
       "releasePath": "bin/kvlite",
-      "description": "Owns selected KVLite driver directories. Release builds carry kvlite_no_linked_extensions and launch verified standalone protocol executables; pass --linked-extensions only for a development/convenience profile."
+      "description": "Owns selected KVLite driver directories. The default CLI launches verified standalone protocol executables; pass --linked-extensions only for an engine-owned development/convenience build."
     },
     {
       "id": "c-shared",

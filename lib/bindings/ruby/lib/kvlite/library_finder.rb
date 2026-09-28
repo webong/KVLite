@@ -14,10 +14,12 @@ module KVLite
 
       roots.compact.reject(&:empty?).uniq.each do |root|
         candidates = []
+        prefer_host = !(RbConfig::CONFIG["host_os"] =~ /darwin/ && RbConfig::CONFIG["host_cpu"] =~ /x86_64|amd64/)
+        candidates.concat([File.join(root, "host", "lib", library_name), File.join(root, "lib", library_name)]) if prefer_host
         candidates << File.join(root, "drivers", driver, "lib", library_name) if driver
         sole = sole_driver_bundle(root)
         candidates << sole if sole
-        candidates << File.join(root, "lib", library_name)
+        candidates.concat([File.join(root, "host", "lib", library_name), File.join(root, "lib", library_name)]) unless prefer_host
         found = candidates.find { |candidate| File.file?(candidate) }
         return File.expand_path(found) if found
       end

@@ -81,4 +81,4 @@ RUN go mod download \
 
 COPY . .
 
-CMD ["sh", "-c", "go test -tags 'rocksdb,kvlite_rocksdb' . ./src/... ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic"]
+CMD ["sh", "-c", "go test -tags rocksdb . ./src/... ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic"]

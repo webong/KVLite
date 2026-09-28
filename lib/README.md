@@ -74,7 +74,7 @@ The C shared-library artifact is intentionally embedded-only. The driver
 bundle's `kvlite-module.json` makes its checksummed artifacts discoverable by
 the generic module catalog, and the installed HTTP and Redis extensions use the
 same metadata contract as executable modules. The default CLI links neither
-protocol extension (built with `kvlite_no_linked_extensions`); it launches a
+protocol extension; it launches a
 verified standalone executable instead. A linked CLI with both protocols is
 only a development convenience (`--linked-extensions`), not the release
 profile.

@@ -203,25 +203,28 @@ toolchain-coupled `plugin` mechanism.
 
 ## Platform support
 
-Linked drivers, the C embedding ABI, and pure-C native modules work on
-every supported target. One combination does not: a Go host process loading
+Engine-owned linked executables, their direct C embedding ABI, and pure-C native
+modules work on every supported target. One combination does not: a Go host process loading
 a Go-built shared library on Intel macOS corrupts the heap deterministically
 (two Go runtimes cannot share the process there; ARM64 and Linux tolerate
 it). The loader therefore refuses `c-shared` loads on `darwin/amd64` with an
-actionable error instead of crashing — use a linked driver build there, or
-load the C ABI from a non-Go host (Python ctypes, Node N-API, PHP FFI and
-Rust all load the same libraries safely on every platform, Intel included).
+actionable error instead of crashing — use the engine bundle's linked
+executable there, or have a non-Go language binding load that engine-owned C ABI
+library directly. The generic host C library cannot load a Go engine module
+on Intel macOS either, because it would still create two Go runtimes.
+The thin Go binding also refuses the Go-built C ABI there; use the CLI or a
+transport from Go on that target.
 C-implemented drivers for Intel macOS should ship as `native-module` kind,
 which stays unguarded. `KVLITE_ALLOW_INTEL_DLOPEN=1` overrides the refusal
 for experiments, expecting crashes.
 
 ## Installed release layout
 `scripts/build-release.sh` emits a checksummed `kvlite-module.json` with every
-bundle. A driver bundle is a prebuilt `libkvlite` C shared library and/or a
-`kvlite` host/CLI executable containing core plus that driver; language
-bindings can use it without compiling Go or RocksDB. Driver release CLIs are
-built with `kvlite_no_linked_extensions` by default, so they stay small
-host/runners and launch verified standalone protocol executables in `auto` or
+engine or transport bundle. The separate `host/` artifact contains a
+driverless CLI and C shared library; language bindings prefer that library
+and select a checksummed engine bundle at runtime. An engine bundle contains
+its own C shared library and optional executable linked to that one engine.
+The executable launches verified standalone protocol modules in `auto` or
 `standalone` mode. Pass `--linked-extensions` (or
 `KVLITE_LINKED_EXTENSIONS=1`) only for an explicit development/convenience
 profile that links HTTP and Redis into the CLI.
@@ -320,10 +323,11 @@ and every capability declared by its installed manifest. It rejects a
 mismatch before registering the driver. Manifests using an older or newer
 module ABI are rejected before their libraries are loaded.
 
-`Open` prefers a linked driver, then an installed C-shared bundle, then an
-installed native module; a missing driver still reports the usual
-actionable error. Go's toolchain-coupled `plugin` package remains
-unsupported by design.
+`Open` prefers a linked driver inside an engine-owned bundle, then an
+installed C-shared bundle, then an installed native module. The normal host
+links no persistent engine, so it uses the installed-module path. A missing
+driver still reports the usual actionable error. Go's toolchain-coupled
+`plugin` package remains unsupported by design.
 
 ## Source layout
 
@@ -331,7 +335,10 @@ All optional source modules live under `extensions/*`: RocksDB, LevelDB,
 Berkeley DB, HTTP, and Redis. Linked Go modules register the same metadata as
 their standalone bundles. Native driver modules use the implemented
 `kvlite_module_init_v1` C entry point described above. Go runtime plugins are
-not part of the module contract.
+not part of the module contract. The generic `cmd/kvlite` and `capi` packages
+do not import an engine. Each engine keeps its own bundle import source under
+`extensions/<engine>/bundle/`; the build recipe overlays that one import only
+while producing an engine-owned artifact.
 
 `extensions/berkeleydb` is a CGo adapter, not a Berkeley DB binary
 distribution. It does not change licensing for any other KVLite module and is

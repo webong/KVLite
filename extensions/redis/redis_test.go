@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
+	"kvlite"
 )
 
 type redisTestEngine struct {
@@ -685,6 +685,20 @@ func TestClosingServerLeavesEmbeddedOwnerOpen(t *testing.T) {
 func TestServeRemoteRejectsNilDatabase(t *testing.T) {
 	if _, err := ServeRemote(nil, Options{ListenAddress: "127.0.0.1:0"}); err == nil {
 		t.Fatal("ServeRemote(nil) unexpectedly succeeded")
+	}
+}
+
+func TestServeRemoteRejectsEmbeddedOwner(t *testing.T) {
+	db, err := kvlite.Open(t.TempDir(), kvlite.WithDriver("memory"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if db.IsRemote() {
+		t.Fatal("embedded database is unexpectedly marked remote")
+	}
+	if _, err := ServeRemote(db, Options{ListenAddress: "127.0.0.1:0"}); err == nil {
+		t.Fatal("ServeRemote over an embedded database unexpectedly succeeded")
 	}
 }
 

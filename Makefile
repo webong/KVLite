@@ -8,7 +8,6 @@ ROCKSDB_VERSION ?= v10.8.3
 BERKELEYDB_CFLAGS ?= $(CGO_CFLAGS)
 BERKELEYDB_LDFLAGS ?= $(CGO_LDFLAGS)
 DRIVER ?= rocksdb
-DRIVER_TAGS ?= $(if $(filter rocksdb,$(DRIVER)),rocksdb kvlite_rocksdb,$(if $(filter leveldb,$(DRIVER)),kvlite_leveldb,$(if $(filter berkeleydb,$(DRIVER)),berkeleydb kvlite_berkeleydb,$(if $(filter badgerdb,$(DRIVER)),kvlite_badgerdb,$(if $(filter boltdb,$(DRIVER)),kvlite_boltdb,$(if $(filter lmdb,$(DRIVER)),kvlite_lmdb,))))))
 
 ifeq ($(DRIVER),berkeleydb)
 DRIVER_CGO_ENV = CGO_CFLAGS="$(BERKELEYDB_CFLAGS)" CGO_LDFLAGS="$(BERKELEYDB_LDFLAGS)"
@@ -23,13 +22,13 @@ test-race:
 	go test -race . ./src/... ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
 
 test-rocksdb:
-	go test -tags 'rocksdb,kvlite_rocksdb' . ./src/... ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
+	go test -tags rocksdb . ./src/... ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
 
 # Berkeley DB is intentionally not part of the default or release suites.
 # Supply headers and a library from a Berkeley DB distribution you are licensed
 # to use, for example CGO_CFLAGS=-I... CGO_LDFLAGS=-L.../lib -ldb.
 test-berkeleydb:
-	CGO_CFLAGS="$(BERKELEYDB_CFLAGS)" CGO_LDFLAGS="$(BERKELEYDB_LDFLAGS)" go test -tags 'berkeleydb,kvlite_berkeleydb' . ./src/... ./capi ./cmd/kvlite ./extensions/berkeleydb/...
+	CGO_CFLAGS="$(BERKELEYDB_CFLAGS)" CGO_LDFLAGS="$(BERKELEYDB_LDFLAGS)" go test -tags berkeleydb . ./src/... ./capi ./cmd/kvlite ./extensions/berkeleydb/...
 
 test-rocksdb-docker:
 	ROCKSDB_VERSION="$(ROCKSDB_VERSION)" bash ./scripts/test-rocksdb-docker.sh
@@ -55,11 +54,19 @@ vet:
 
 build-cli:
 	mkdir -p dist
-	$(DRIVER_CGO_ENV) go build -tags '$(DRIVER_TAGS)' -o dist/kvlite ./cmd/kvlite
+ifeq ($(DRIVER),none)
+	go build -o dist/kvlite ./cmd/kvlite
+else
+	$(DRIVER_CGO_ENV) bash ./scripts/build-driver-artifact.sh "$(DRIVER)" cli dist/kvlite
+endif
 
 build-c-shared:
 	mkdir -p dist
-	$(DRIVER_CGO_ENV) go build -tags '$(DRIVER_TAGS)' -buildmode=c-shared -o dist/libkvlite.so ./capi
+ifeq ($(DRIVER),none)
+	go build -buildmode=c-shared -o dist/libkvlite.so ./capi
+else
+	$(DRIVER_CGO_ENV) bash ./scripts/build-driver-artifact.sh "$(DRIVER)" c-shared dist/libkvlite.so
+endif
 
 # Build distributable artifacts for the current native platform. RocksDB uses
 # cgo, so release builds intentionally run on the matching OS and CPU.

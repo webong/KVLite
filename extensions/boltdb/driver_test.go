@@ -9,9 +9,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/webong/kvlite/extensions/boltdb"
 	"kvlite"
 	"kvlite/enginetest"
-	"github.com/webong/kvlite/extensions/boltdb"
 )
 
 func TestAtomicMutations(t *testing.T) {

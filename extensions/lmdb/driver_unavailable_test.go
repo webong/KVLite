@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"kvlite"
 	_ "github.com/webong/kvlite/extensions/lmdb"
+	"kvlite"
 )
 
 func TestUnavailableWithoutCGO(t *testing.T) {

@@ -38,12 +38,18 @@ class LibraryFinder:
                 candidates.append(Path(candidate).expanduser())
 
         library_name = LibraryFinder._library_name()
+        # A generic Go host cannot safely dlopen another Go runtime on Intel
+        # macOS; there the engine-owned library remains the first choice.
+        prefer_host = not (platform.system() == "Darwin" and platform.machine().lower() in ("x86_64", "amd64"))
         for home_path in LibraryFinder._catalog_roots():
+            if prefer_host:
+                candidates.extend((home_path / "host" / "lib" / library_name, home_path / "lib" / library_name))
             if driver:
                 candidates.append(home_path / "drivers" / driver / "lib" / library_name)
             if bundled := LibraryFinder._sole_driver_bundle(home_path, library_name):
                 candidates.append(bundled)
-            candidates.append(home_path / "lib" / library_name)
+            if not prefer_host:
+                candidates.extend((home_path / "host" / "lib" / library_name, home_path / "lib" / library_name))
 
         package_root = Path(__file__).resolve().parents[2]
         target = LibraryFinder._target()
@@ -51,8 +57,12 @@ class LibraryFinder:
 
         # Convenient when using the package directly in a KVLite source checkout.
         repository_root = package_root.parents[2]
+        if prefer_host:
+            candidates.append(repository_root / "dist" / "dev" / target / "host" / "lib" / library_name)
         if driver:
             candidates.append(repository_root / "dist" / "dev" / target / "drivers" / driver / "lib" / library_name)
+        if not prefer_host:
+            candidates.append(repository_root / "dist" / "dev" / target / "host" / "lib" / library_name)
         candidates.append(repository_root / "dist" / "dev" / target / "lib" / library_name)
 
         for candidate in candidates:

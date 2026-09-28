@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"kvlite"
 	"github.com/webong/kvlite/extensions/leveldb"
+	"kvlite"
 )
 
 func TestModuleManifestMatchesLinkedMetadata(t *testing.T) {

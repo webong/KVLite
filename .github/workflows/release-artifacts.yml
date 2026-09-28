@@ -133,7 +133,7 @@ jobs:
           # This mirrors product topology, where C++ lives inside driver
           # bundles and loading hosts stay lean.
           go test . ./src/... ./capi ./cmd/kvlite ./extensions/http/... ./extensions/redis/...
-          go test -tags 'rocksdb,kvlite_rocksdb' ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
+          go test -tags rocksdb ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
           make release RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}" DRIVER=none
           make release RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}" DRIVER=rocksdb
           make release RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}" DRIVER=leveldb
@@ -143,7 +143,8 @@ jobs:
           make release-http RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}"
           make release-redis RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}"
 
-      - name: Go binding against the packaged LevelDB library
+      - name: Go binding through the host and installed LevelDB bundle
+        if: matrix.target != 'darwin-amd64'
         shell: bash
         run: |
           version="${GITHUB_REF_NAME}"
@@ -155,7 +156,8 @@ jobs:
           if [[ "${RUNNER_OS}" == 'macOS' ]]; then
             library_name=libkvlite.dylib
           fi
-          export KVLITE_TEST_NATIVE_LIBRARY="$PWD/dist/$version/$target/drivers/leveldb/lib/$library_name"
+          export KVLITE_HOME="$PWD/dist/$version/$target"
+          export KVLITE_TEST_NATIVE_LIBRARY="$KVLITE_HOME/host/lib/$library_name"
           export KVLITE_TEST_NATIVE_DRIVER=leveldb
           GOWORK=off go test -run '^TestInstalledNativeLibrary$' -count=1 ./...
 

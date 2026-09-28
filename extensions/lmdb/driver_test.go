@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/webong/kvlite/extensions/lmdb"
 	"kvlite"
 	"kvlite/enginetest"
-	"github.com/webong/kvlite/extensions/lmdb"
 )
 
 func TestAtomicMutations(t *testing.T) {

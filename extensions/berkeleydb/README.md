@@ -41,8 +41,8 @@ CGO_LDFLAGS="-L/path/to/berkeleydb/lib" \
 go build -tags berkeleydb ./your-app
 ```
 
-To include it in the `kvlite` CLI or `libkvlite` C ABI bundle, use both build
-tags: `berkeleydb,kvlite_berkeleydb`:
+To build a Berkeley DB-owned CLI or C ABI bundle, use the extension build
+recipe. The generic host remains driverless:
 
 ```bash
 make build-cli DRIVER=berkeleydb \

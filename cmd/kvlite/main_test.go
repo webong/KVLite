@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"kvlite"
-	kvliteredis "github.com/webong/kvlite/extensions/redis"
 )
 
 func withLinkedExtensionProbes(t *testing.T, httpLinked, redisLinked bool) func() {
@@ -540,12 +539,13 @@ func main() {
 	listen := flags.String("listen", "", "")
 	_ = flags.String("driver", "", "")
 	_ = flags.String("token", "", "")
+	driverPath := flags.String("driver-path", "", "")
 	_ = flags.Int64("max-request-bytes", 0, "")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		panic(err)
 	}
-	if *path == "" || *listen == "" {
-		panic("path and listen are required")
+	if *path == "" || *listen == "" || *driverPath != "leveldb=/tmp/level-data" {
+		panic("path, listen, and driver-path are required")
 	}
 	if err := os.WriteFile(%q, []byte(*path), 0o600); err != nil {
 		panic(err)
@@ -603,7 +603,7 @@ func main() {
 	t.Setenv("KVLITE_HOME", "")
 	dataPath := filepath.Join(root, "data")
 	ownerListen := "127.0.0.1:18091"
-	if got := run([]string{"serve", "--path", dataPath, "--extension-mode", "standalone", "--listen", ownerListen, "--redis-listen", "127.0.0.1:16391"}); got != 0 {
+	if got := run([]string{"serve", "--path", dataPath, "--extension-mode", "standalone", "--listen", ownerListen, "--redis-listen", "127.0.0.1:16391", "--driver-path", "leveldb=/tmp/level-data"}); got != 0 {
 		t.Fatalf("run(serve standalone both) = %d, want 0", got)
 	}
 	written, err := os.ReadFile(httpMarkerPath)
@@ -779,23 +779,6 @@ func TestMemoryDriverAvailableWithoutLinkedDrivers(t *testing.T) {
 	}
 }
 
-func TestAttachedRedisRejectsEmbeddedOwner(t *testing.T) {
-	// Needs a real embedded database; run with -tags kvlite_leveldb.
-	db, err := kvlite.Open(t.TempDir(), kvlite.WithDriver("leveldb"))
-	if err != nil {
-		t.Skipf("leveldb driver is not linked into this test binary: %v", err)
-	}
-	defer db.Close()
-	if db.IsRemote() {
-		t.Fatal("embedded database is unexpectedly marked remote")
-	}
-	// The attached topology must refuse an embedded handle at the API
-	// boundary instead of serving a second owner for one directory.
-	if _, err := kvliteredis.ServeRemote(db, kvliteredis.Options{ListenAddress: "127.0.0.1:0"}); err == nil {
-		t.Fatal("ServeRemote over an embedded database unexpectedly succeeded")
-	}
-}
-
 // buildFakeModule compiles a small standalone program and publishes it as an
 // installed executable module for discovery through KVLITE_MODULE_PATH.
 func buildFakeModule(t *testing.T, root, name string, capabilities []string, program string) {
@@ -947,11 +930,33 @@ func TestServeAutoRejectsRedisWithoutLinkedRedis(t *testing.T) {
 	}
 }
 
-func TestServeAutoRejectsDriverPathWithoutLinkedHTTP(t *testing.T) {
+func TestServeAutoForwardsDriverPathToStandaloneHTTP(t *testing.T) {
+	if runtime.GOOS == "js" || runtime.GOOS == "wasip1" {
+		t.Skip("standalone module execution is not supported")
+	}
 	restore := withLinkedExtensionProbes(t, false, true)
 	defer restore()
-
-	if got := run([]string{"serve", "--path", t.TempDir(), "--extension-mode", "auto", "--listen", "127.0.0.1:8089", "--driver-path", "rocksdb=/tmp"}); got != 1 {
-		t.Fatalf("run(serve auto driver-path fallback) = %d, want 1", got)
+	root := t.TempDir()
+	marker := filepath.Join(root, "args.txt")
+	program := fmt.Sprintf(`package main
+import (
+	"os"
+	"strings"
+)
+func main() {
+	if err := os.WriteFile(%q, []byte(strings.Join(os.Args[1:], "\n")), 0600); err != nil { panic(err) }
+}`, marker)
+	buildFakeModule(t, root, "http", []string{"http-client", "http-server"}, program)
+	t.Setenv("KVLITE_MODULE_PATH", root)
+	t.Setenv("KVLITE_HOME", "")
+	if got := run([]string{"serve", "--path", filepath.Join(root, "primary"), "--extension-mode", "auto", "--listen", "127.0.0.1:8089", "--driver-path", "rocksdb=/tmp/rocks", "--driver-path", "leveldb=/tmp/level"}); got != 0 {
+		t.Fatalf("run(serve auto driver-path fallback) = %d, want 0", got)
+	}
+	args, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--driver-path\nleveldb=/tmp/level\n--driver-path\nrocksdb=/tmp/rocks") {
+		t.Fatalf("standalone HTTP args = %q, missing ordered driver mappings", args)
 	}
 }

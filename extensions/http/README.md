@@ -20,8 +20,9 @@ driver C-shared bundle at runtime):
 kvlite-http --path ./data --driver leveldb --listen 127.0.0.1:8089 --token "$KVLITE_TOKEN"
 ```
 
-The binary supports `--max-request-bytes`, prints its listener URL on startup,
-and exits with `Ctrl-C` when you stop ownership of the server.
+The binary also accepts repeated `--driver-path DRIVER=PATH` mappings and
+`--max-request-bytes`, prints its listener URL on startup, and exits with
+`Ctrl-C` when you stop ownership of the server.
 
 ```go
 import (

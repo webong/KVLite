@@ -53,6 +53,8 @@ trap cleanup EXIT
 
 echo "standalone-modules test: building $driver driver bundle" >&2
 bash "$repo_root/scripts/build-release.sh" --version "$version" --target "$target" --driver "$driver" >/dev/null
+echo "standalone-modules test: building driverless host" >&2
+bash "$repo_root/scripts/build-release.sh" --version "$version" --target "$target" --driver none >/dev/null
 echo "standalone-modules test: building HTTP extension bundle" >&2
 bash "$repo_root/scripts/build-release.sh" --version "$version" --target "$target" --extension http >/dev/null
 echo "standalone-modules test: building Redis extension bundle" >&2
@@ -60,22 +62,25 @@ bash "$repo_root/scripts/build-release.sh" --version "$version" --target "$targe
 
 dist_root="$repo_root/dist/$version/$target"
 driver_bundle="$dist_root/drivers/$driver"
+host_bundle="$dist_root/host"
 http_bundle="$dist_root/modules/http"
 redis_bundle="$dist_root/modules/redis"
-[[ -d "$driver_bundle" && -d "$http_bundle" && -d "$redis_bundle" ]] || fail "expected release bundles under $dist_root"
+[[ -d "$driver_bundle" && -d "$host_bundle" && -d "$http_bundle" && -d "$redis_bundle" ]] || fail "expected release bundles under $dist_root"
 
 home="$work_root/home"
-mkdir -p "$home/drivers" "$home/modules"
+mkdir -p "$home/drivers" "$home/modules" "$home/bin" "$home/lib"
 cp -R "$driver_bundle" "$home/drivers/$driver"
 cp -R "$http_bundle" "$home/modules/http"
 cp -R "$redis_bundle" "$home/modules/redis"
+cp "$host_bundle"/bin/* "$home/bin/"
+cp "$host_bundle"/lib/* "$home/lib/"
 
 export KVLITE_HOME="$home"
 export KVLITE_MODULE_PATH=""
 
 case "$target" in
-  windows-*) cli_bin="$home/drivers/$driver/bin/kvlite.exe"; http_bin="$home/modules/http/bin/kvlite-http.exe"; redis_bin="$home/modules/redis/bin/kvlite-redis.exe" ;;
-  *) cli_bin="$home/drivers/$driver/bin/kvlite"; http_bin="$home/modules/http/bin/kvlite-http"; redis_bin="$home/modules/redis/bin/kvlite-redis" ;;
+  windows-*) cli_bin="$home/bin/kvlite.exe"; http_bin="$home/modules/http/bin/kvlite-http.exe"; redis_bin="$home/modules/redis/bin/kvlite-redis.exe" ;;
+  *) cli_bin="$home/bin/kvlite"; http_bin="$home/modules/http/bin/kvlite-http"; redis_bin="$home/modules/redis/bin/kvlite-redis" ;;
 esac
 [[ -x "$cli_bin" && -x "$http_bin" && -x "$redis_bin" ]] || fail "release executables are not executable"
 
@@ -84,6 +89,7 @@ list_output="$("$cli_bin" module list)"
 for name in "$driver" http redis; do
   echo "$list_output" | grep -q "^$name[[:space:]]" || fail "module list missing $name (got: $list_output)"
 done
+"$cli_bin" driver list | grep -q "^$driver[[:space:]]available=true" || fail "driverless host did not list installed $driver engine"
 echo "$list_output" | grep -q "^$driver[[:space:]]kind=engine[[:space:]]" || fail "$driver is not listed as an engine extension"
 for name in http redis; do
   echo "$list_output" | grep -q "^$name[[:space:]]kind=transport[[:space:]]" || fail "$name is not listed as a transport extension"
@@ -93,6 +99,16 @@ echo "standalone-modules test: module verify checks checksums" >&2
 "$cli_bin" module verify "$driver" >/dev/null || fail "verify $driver failed"
 "$cli_bin" module verify http >/dev/null || fail "verify http failed"
 "$cli_bin" module verify redis >/dev/null || fail "verify redis failed"
+
+echo "standalone-modules test: generic C ABI host opens the installed driver" >&2
+case "$target" in
+  darwin-*) host_library="$home/lib/libkvlite.dylib" ;;
+  windows-*) host_library="$home/lib/kvlite.dll" ;;
+  *) host_library="$home/lib/libkvlite.so" ;;
+esac
+KVLITE_LIBRARY_PATH="$host_library" KVLITE_TEST_NATIVE_DRIVER="$driver" \
+  GOWORK=off go test -run '^TestInstalledNativeLibrary$' -count=1 . >/dev/null \
+  || fail "generic C ABI host did not open installed $driver driver"
 
 echo "standalone-modules test: tampered artifacts fail verification" >&2
 tamper_root="$work_root/tamper"
@@ -405,4 +421,27 @@ assert body == '{"served":"both"}', "orchestrated GET body = " + body
 s.close()
 PYEOF
 
-echo "standalone-modules test: ok ($driver + http put/get/scan + redis strings/hashes + shared owner/restart + cli orchestration + missing-driver + cli standalone)" >&2
+echo "standalone-modules test: driverless CLI exports and imports through the installed engine" >&2
+kill "$cli_both_pid"
+wait "$cli_both_pid" 2>/dev/null || true
+cli_both_pid=""
+archive="$work_root/both-data.jsonl"
+"$cli_bin" export --path "$both_db" --driver "$driver" --output "$archive" || fail "driverless CLI export failed"
+import_db="$work_root/imported-data"
+"$cli_bin" import --path "$import_db" --driver "$driver" --input "$archive" || fail "driverless CLI import failed"
+import_port="$(free_port)"
+kill "$owner_pid" 2>/dev/null || true
+wait "$owner_pid" 2>/dev/null || true
+owner_pid=""
+"$http_bin" --path "$import_db" --driver "$driver" --listen "127.0.0.1:$import_port" >"$work_root/imported-owner.log" 2>&1 &
+owner_pid=$!
+imported_key="$(python3 -c 'import base64; print(base64.urlsafe_b64encode(b"both-key").decode().rstrip("="))')"
+imported_value=""
+for _ in $(seq 1 100); do
+  imported_value="$(curl -fsS "http://127.0.0.1:$import_port/v1/entries/$imported_key" 2>/dev/null || true)"
+  [[ -n "$imported_value" ]] && break
+  sleep 0.2
+done
+[[ "$imported_value" == '{"served":"both"}' ]] || fail "imported value = $imported_value"
+
+echo "standalone-modules test: ok ($driver + driverless host + http/redis + export/import + shared owner/restart + missing-driver)" >&2

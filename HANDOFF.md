@@ -1,5 +1,10 @@
 # KVLite standalone-extension release handoff
 
+> Historical release plan: the baseline and unchecked items below describe
+> earlier work, not the current build contract. See [MODULES.md](MODULES.md)
+> for the current driverless host, runtime modules, and explicit engine-owned
+> linked convenience builds.
+
 **Prepared:** 2026-09-04  
 **Repository baseline inspected:** `main` at `c842cbe` (`origin/main`), clean
 before this handoff document was added
@@ -60,7 +65,7 @@ multi-protocol shared-owner IPC design are deliberately separate milestones.
 
 | Area | Agreed contract |
 | --- | --- |
-| Core | `github.com/webong/kvlite` remains embeddable. It has no default linked driver or network listener. |
+| Core | The unpublished `src/` Go module is `kvlite`; repository-root `github.com/webong/kvlite` is the thin Go binding. The generic host links no persistent engine or network listener. |
 | Driver choice | `WithDriver(...)` selects an installed engine when a local DB is first opened. `KVLITE-MANIFEST.json` persists that choice and rejects a different engine on reopen. Engine directories are never interchangeable. |
 | Driver distribution | Every driver is an extension under `extensions/`. A packaged driver currently exposes a checksummed `c-shared` KVLite ABI bundle, loaded through the module driver loader. |
 | Protocol distribution | HTTP and Redis are extensions, never a mandatory core dependency. A standalone module is an executable discovered from an explicit module directory and launched with `kvlite module run`. |

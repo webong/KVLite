@@ -86,6 +86,12 @@ func Open(path string, options ...Option) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The released C ABI libraries are Go-built. Loading one into a second Go
+	// runtime crashes on Intel macOS, regardless of whether it is the generic
+	// host or an engine-owned bundle. Keep the failure actionable.
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" && os.Getenv("KVLITE_ALLOW_INTEL_DLOPEN") == "" {
+		return nil, fmt.Errorf("%w: embedded Go binding cannot load a Go-built KVLite library on Intel macOS; use the KVLite CLI or a transport extension", ErrNativeLibrary)
+	}
 	native, err := openNative(library, path, c.driver, c.explicitDriver)
 	if err != nil {
 		return nil, err
@@ -196,7 +202,13 @@ func findLibrary(c config) (string, error) {
 		if root == "" {
 			continue
 		}
-		candidates := []string{filepath.Join(root, "drivers", c.driver, "lib", name)}
+		// Prefer the driverless host. It loads the selected installed engine
+		// through the verified runtime module interface.
+		candidates := []string{
+			filepath.Join(root, "host", "lib", name),
+			filepath.Join(root, "lib", name),
+			filepath.Join(root, "drivers", c.driver, "lib", name),
+		}
 		if entries, err := os.ReadDir(filepath.Join(root, "drivers")); err == nil {
 			var sole string
 			for _, entry := range entries {
@@ -213,14 +225,13 @@ func findLibrary(c config) (string, error) {
 				candidates = append(candidates, sole)
 			}
 		}
-		candidates = append(candidates, filepath.Join(root, "lib", name))
 		for _, candidate := range candidates {
 			if regularFile(candidate) {
 				return filepath.Abs(candidate)
 			}
 		}
 	}
-	return "", fmt.Errorf("%w: install a native driver bundle or set KVLITE_LIBRARY_PATH", ErrNativeLibrary)
+	return "", fmt.Errorf("%w: install the KVLite host and a driver bundle, or set KVLITE_LIBRARY_PATH", ErrNativeLibrary)
 }
 
 func requireLibrary(path string) (string, error) {

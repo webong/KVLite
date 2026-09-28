@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
 	kvliteredis "github.com/webong/kvlite/extensions/redis"
+	"kvlite"
 )
 
 func main() {

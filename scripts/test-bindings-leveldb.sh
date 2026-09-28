@@ -11,7 +11,7 @@ case "$(go env GOOS)" in
   *) library_name="libkvlite.so" ;;
 esac
 
-go build -tags kvlite_leveldb -buildmode=c-shared -o "$temp_dir/$library_name" ./capi
+bash ./scripts/build-driver-artifact.sh leveldb c-shared "$temp_dir/$library_name"
 PYTHONPATH="$repo_root/lib/bindings/python/src" \
 KVLITE_LIBRARY_PATH="$temp_dir/$library_name" \
 python3 "$repo_root/lib/bindings/python/tests/real_leveldb_native.py"

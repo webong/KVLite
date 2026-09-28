@@ -317,20 +317,34 @@ impl LibraryFinder {
         if let Some(path) = env::var_os("KVLITE_LIBRARY_PATH") {
             candidates.push(PathBuf::from(path));
         }
+        let prefer_host = !cfg!(all(target_os = "macos", target_arch = "x86_64"));
         for home in Self::catalog_roots() {
+            if prefer_host {
+                candidates.push(home.join("host").join("lib").join(Self::library_name()));
+                candidates.push(home.join("lib").join(Self::library_name()));
+            }
             if let Some(driver) = driver {
                 candidates.push(home.join("drivers").join(driver).join("lib").join(Self::library_name()));
             }
             if let Some(bundle) = Self::sole_driver_bundle(&home) {
                 candidates.push(bundle);
             }
-            candidates.push(home.join("lib").join(Self::library_name()));
+            if !prefer_host {
+                candidates.push(home.join("host").join("lib").join(Self::library_name()));
+                candidates.push(home.join("lib").join(Self::library_name()));
+            }
         }
         let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let target = Self::target();
         candidates.push(package_root.join("native").join(&target).join(Self::library_name()));
+        if prefer_host {
+            candidates.push(package_root.join("../../../dist/dev").join(&target).join("host").join("lib").join(Self::library_name()));
+        }
         if let Some(driver) = driver {
             candidates.push(package_root.join("../../../dist/dev").join(&target).join("drivers").join(driver).join("lib").join(Self::library_name()));
+        }
+        if !prefer_host {
+            candidates.push(package_root.join("../../../dist/dev").join(&target).join("host").join("lib").join(Self::library_name()));
         }
         candidates.push(package_root.join("../../../dist/dev").join(&target).join("lib").join(Self::library_name()));
 

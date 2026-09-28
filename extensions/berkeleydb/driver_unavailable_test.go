@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"kvlite"
 	_ "github.com/webong/kvlite/extensions/berkeleydb"
+	"kvlite"
 )
 
 func TestBerkeleyDBDriverReportsMissingNativeBuild(t *testing.T) {

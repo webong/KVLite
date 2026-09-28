@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"kvlite"
 	bolt "go.etcd.io/bbolt"
+	"kvlite"
 )
 
 const Name kvlite.DriverName = kvlite.DriverBoltDB

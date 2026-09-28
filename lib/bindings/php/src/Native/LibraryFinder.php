@@ -18,7 +18,12 @@ final class LibraryFinder
         }
 
         $libraryName = self::libraryName();
+        $preferHost = !(PHP_OS_FAMILY === 'Darwin' && in_array(strtolower(php_uname('m')), ['x86_64', 'amd64'], true));
         foreach (self::catalogRoots() as $home) {
+            if ($preferHost) {
+                $candidates[] = $home.'/host/lib/'.$libraryName;
+                $candidates[] = $home.'/lib/'.$libraryName;
+            }
             if ($driver !== null) {
                 $candidates[] = $home.DIRECTORY_SEPARATOR.'drivers'.DIRECTORY_SEPARATOR.$driver.DIRECTORY_SEPARATOR.'lib'.DIRECTORY_SEPARATOR.$libraryName;
             }
@@ -26,7 +31,10 @@ final class LibraryFinder
             if ($soleBundle !== null) {
                 $candidates[] = $soleBundle;
             }
-            $candidates[] = $home.DIRECTORY_SEPARATOR.'lib'.DIRECTORY_SEPARATOR.$libraryName;
+            if (!$preferHost) {
+                $candidates[] = $home.'/host/lib/'.$libraryName;
+                $candidates[] = $home.'/lib/'.$libraryName;
+            }
         }
 
         $packageRoot = dirname(__DIR__, 2);
@@ -37,8 +45,14 @@ final class LibraryFinder
         // `make release RELEASE_VERSION=dev`, without affecting installed
         // Composer packages.
         $repositoryRoot = dirname(__DIR__, 5);
+        if ($preferHost) {
+            $candidates[] = $repositoryRoot.'/dist/dev/'.$target.'/host/lib/'.$libraryName;
+        }
         if ($driver !== null) {
             $candidates[] = $repositoryRoot.'/dist/dev/'.$target.'/drivers/'.$driver.'/lib/'.$libraryName;
+        }
+        if (!$preferHost) {
+            $candidates[] = $repositoryRoot.'/dist/dev/'.$target.'/host/lib/'.$libraryName;
         }
         $candidates[] = $repositoryRoot.'/dist/dev/'.$target.'/lib/'.$libraryName;
 

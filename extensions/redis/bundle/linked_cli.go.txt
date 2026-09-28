@@ -1,0 +1,19 @@
+package main
+
+import (
+	"kvlite"
+	kvliteredis "github.com/webong/kvlite/extensions/redis"
+)
+
+func init() {
+	isRedisExtensionLinked = func() bool {
+		_, err := kvlite.LinkedModule("redis")
+		return err == nil
+	}
+	linkedRedisServe = func(database *kvlite.DB, options linkedRedisServeConfig) (linkedRedisServer, error) {
+		return kvliteredis.Serve(database, kvliteredis.Options{
+			ListenAddress: options.listenAddress,
+			Password:      options.password,
+		})
+	}
+}

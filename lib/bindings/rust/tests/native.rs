@@ -70,13 +70,17 @@ fn finds_installed_driver_in_system_catalog() {
     let installed = catalog.join("drivers/leveldb/lib").join(mock.path.file_name().unwrap());
     fs::create_dir_all(installed.parent().unwrap()).unwrap();
     fs::copy(&mock.path, &installed).unwrap();
+    let host = catalog.join("lib").join(mock.path.file_name().unwrap());
+    fs::create_dir_all(host.parent().unwrap()).unwrap();
+    fs::copy(&mock.path, &host).unwrap();
     let previous_catalog = env::var_os("KVLITE_SYSTEM_MODULE_PATH");
     let previous_library = env::var_os("KVLITE_LIBRARY_PATH");
     let previous_home = env::var_os("KVLITE_HOME");
     env::set_var("KVLITE_SYSTEM_MODULE_PATH", &catalog);
     env::remove_var("KVLITE_LIBRARY_PATH");
     env::remove_var("KVLITE_HOME");
-    assert_eq!(LibraryFinder::find(None, Some("leveldb")).unwrap(), installed);
+    let expected = if cfg!(all(target_os = "macos", target_arch = "x86_64")) { installed } else { host };
+    assert_eq!(LibraryFinder::find(None, Some("leveldb")).unwrap(), expected);
     match previous_catalog { Some(value) => env::set_var("KVLITE_SYSTEM_MODULE_PATH", value), None => env::remove_var("KVLITE_SYSTEM_MODULE_PATH") }
     match previous_library { Some(value) => env::set_var("KVLITE_LIBRARY_PATH", value), None => env::remove_var("KVLITE_LIBRARY_PATH") }
     match previous_home { Some(value) => env::set_var("KVLITE_HOME", value), None => env::remove_var("KVLITE_HOME") }

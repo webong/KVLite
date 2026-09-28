@@ -309,13 +309,13 @@ func openModuleSharedLibrary(artifactPath string) (*moduleLibrary, error) {
 	// Two Go runtimes cannot share one process on Intel macOS: a Go host
 	// loading a Go-built shared library corrupts the heap deterministically
 	// (bad-sweepgen fatals; ARM64 and Linux tolerate it). Refuse with an
-	// actionable error instead of crashing. Non-Go hosts (Python ctypes,
-	// Node N-API, PHP FFI, Rust) are unaffected, as are linked drivers and
-	// pure-C native modules. Override only to experiment, expecting crashes:
+	// actionable error instead of crashing. Language bindings can load an
+	// engine-owned C ABI library directly on that target; pure-C native
+	// modules are unaffected. Override only to experiment, expecting crashes:
 	// KVLITE_ALLOW_INTEL_DLOPEN=1.
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" && os.Getenv("KVLITE_ALLOW_INTEL_DLOPEN") == "" {
 		return nil, fmt.Errorf(
-			"%w: loading Go driver modules is not supported on Intel macOS; use a linked driver build (for example -tags kvlite_leveldb) or load the C ABI from a non-Go host",
+			"%w: loading Go driver modules is not supported on Intel macOS; use the engine bundle's linked executable or load its C ABI library directly",
 			ErrDriverNotLoaded,
 		)
 	}

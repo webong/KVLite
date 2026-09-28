@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
-	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
+	"kvlite"
 )
 
 func main() {
@@ -23,6 +24,10 @@ func run(args []string) int {
 	listen := flags.String("listen", "127.0.0.1:8089", "HTTP listen address")
 	token := flags.String("token", "", "Bearer token required by clients")
 	maxRequestBytes := flags.Int64("max-request-bytes", 64<<20, "maximum JSON request size")
+	driverPaths := make(map[kvlite.DriverName]string)
+	flags.Func("driver-path", "additional remote driver mapping in DRIVER=PATH form; repeatable", func(raw string) error {
+		return addDriverPath(driverPaths, raw)
+	})
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -49,6 +54,7 @@ func run(args []string) int {
 		ListenAddress:   *listen,
 		BearerToken:     *token,
 		MaxRequestBytes: *maxRequestBytes,
+		DriverPaths:     driverPaths,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "kvlite-http: %v\n", err)
@@ -64,4 +70,19 @@ func run(args []string) int {
 	defer signal.Stop(signals)
 	<-signals
 	return 0
+}
+
+func addDriverPath(paths map[kvlite.DriverName]string, raw string) error {
+	name, path, ok := strings.Cut(raw, "=")
+	name = strings.TrimSpace(name)
+	path = strings.TrimSpace(path)
+	if !ok || name == "" || path == "" {
+		return fmt.Errorf("driver mapping must use DRIVER=PATH")
+	}
+	driver := kvlite.DriverName(strings.ToLower(name))
+	if _, exists := paths[driver]; exists {
+		return fmt.Errorf("driver mapping for %q was supplied more than once", driver)
+	}
+	paths[driver] = path
+	return nil
 }

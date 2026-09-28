@@ -2,9 +2,48 @@ package kvlite
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func TestFindLibraryPrefersDriverlessHost(t *testing.T) {
+	home := t.TempDir()
+	name := libraryName()
+	host := filepath.Join(home, "host", "lib", name)
+	linked := filepath.Join(home, "drivers", "leveldb", "lib", name)
+	for _, path := range []string{host, linked} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("KVLITE_LIBRARY_PATH", "")
+	t.Setenv("KVLITE_HOME", home)
+	t.Setenv("KVLITE_SYSTEM_MODULE_PATH", "")
+	got, err := findLibrary(config{driver: "leveldb", explicitDriver: true})
+	if err != nil || got != host {
+		t.Fatalf("findLibrary() = %q, %v; want driverless host %q", got, err, host)
+	}
+}
+
+func TestIntelMacGoBindingRefusesGoSharedLibrary(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "amd64" {
+		t.Skip("Intel macOS Go-runtime safety guard")
+	}
+	t.Setenv("KVLITE_ALLOW_INTEL_DLOPEN", "")
+	path := filepath.Join(t.TempDir(), libraryName())
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.TempDir(), WithLibraryPath(path)); !errors.Is(err, ErrNativeLibrary) {
+		t.Fatalf("Open(Go-built C ABI on Intel macOS) = %v, want ErrNativeLibrary", err)
+	}
+}
 
 func TestInputValidation(t *testing.T) {
 	for _, options := range [][]Option{{WithDriver("../rocksdb")}, {WithLibraryPath("")}, {nil}} {

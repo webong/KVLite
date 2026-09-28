@@ -187,6 +187,17 @@ if want_component host && [[ -d "$dist_root/host" ]]; then
   # package agrees on, and later installs must never silently replace it.
   cp "$dist_root/host/bin/$host_exe" "$dest_prefix/bin/$host_exe"
   chmod 755 "$dest_prefix/bin/$host_exe"
+  host_library="libkvlite.so"
+  case "$target" in
+    darwin-*) host_library="libkvlite.dylib" ;;
+    windows-*) host_library="kvlite.dll" ;;
+  esac
+  if [[ -f "$dist_root/host/lib/$host_library" ]]; then
+    mkdir -p "$catalog/lib" "$dest_prefix/include"
+    cp "$dist_root/host/lib/$host_library" "$catalog/lib/$host_library"
+    cp "$dist_root/host/include/kvlite.h" "$dest_prefix/include/kvlite.h"
+    chmod 644 "$catalog/lib/$host_library" "$dest_prefix/include/kvlite.h"
+  fi
   installed_host=1
 fi
 
@@ -220,8 +231,9 @@ if ((${#installed_drivers[@]} == 0)) && ((${#installed_modules[@]} == 0)) && [[ 
   fail "nothing to install from $dist_root for components (${components[*]})"
 fi
 
-# The reviewed ABI header is identical across driver bundles; ship one copy.
-if ((${#installed_drivers[@]} > 0)); then
+# Older host bundles may lack a library; use the shared ABI header from an
+# installed driver only when the host has not already provided one.
+if [[ ! -f "$dest_prefix/include/kvlite.h" ]] && ((${#installed_drivers[@]} > 0)); then
   for driver in "${installed_drivers[@]}"; do
     header="$catalog/drivers/$driver/include/kvlite.h"
     if [[ -f "$header" ]]; then

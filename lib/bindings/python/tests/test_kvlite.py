@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import tempfile
 import unittest
@@ -17,8 +18,12 @@ class NativeDatabaseTests(unittest.TestCase):
             library = Path(root) / "drivers" / "leveldb" / "lib" / LibraryFinder._library_name()
             library.parent.mkdir(parents=True)
             shutil.copyfile(os.environ["KVLITE_TEST_LIBRARY"], library)
+            host = Path(root) / "lib" / LibraryFinder._library_name()
+            host.parent.mkdir(parents=True)
+            shutil.copyfile(os.environ["KVLITE_TEST_LIBRARY"], host)
+            prefer_host = not (platform.system() == "Darwin" and platform.machine().lower() in ("x86_64", "amd64"))
             with patch.dict(os.environ, {"KVLITE_SYSTEM_MODULE_PATH": root, "KVLITE_LIBRARY_PATH": "", "KVLITE_HOME": ""}):
-                self.assertEqual(LibraryFinder.find(driver="leveldb"), library.resolve())
+                self.assertEqual(LibraryFinder.find(driver="leveldb"), (host if prefer_host else library).resolve())
 
     def test_json_and_binary_round_trip(self) -> None:
         database = KVLite.open("/tmp/kvlite-python-mock", os.environ["KVLITE_TEST_LIBRARY"], driver="leveldb")

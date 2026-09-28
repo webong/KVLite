@@ -2,7 +2,8 @@
 //
 // Build with:
 //
-//	go build -tags 'rocksdb,kvlite_rocksdb' -buildmode=c-shared -o libkvlite.so ./capi
+//	go build -buildmode=c-shared -o libkvlite.so ./capi
+//	bash scripts/build-driver-artifact.sh rocksdb c-shared libkvlite-rocksdb.so
 package main
 
 /*
