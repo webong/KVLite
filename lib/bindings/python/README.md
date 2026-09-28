@@ -1,4 +1,4 @@
-# `kvlite` for Python
+# `usekvlite` for Python (`import kvlite`)
 
 The Python package provides a local embedded API and a dependency-free remote
 API:

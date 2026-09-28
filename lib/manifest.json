@@ -78,6 +78,12 @@
   ],
   "bindings": [
     {
+      "id": "go",
+      "source": "lib/bindings/go",
+      "package": "github.com/webong/kvlite-go",
+      "transports": ["c-abi"]
+    },
+    {
       "id": "php",
       "source": "lib/bindings/php",
       "package": "webong/kvlite",
@@ -86,7 +92,7 @@
     {
       "id": "python",
       "source": "lib/bindings/python",
-      "package": "kvlite",
+      "package": "usekvlite",
       "transports": ["c-abi", "http", "redis"]
     },
     {

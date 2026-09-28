@@ -9,7 +9,7 @@ control.
 | --- | --- | --- |
 | [`cli/`](cli/) | The `kvlite` owner/server binary contract | `cmd/kvlite` |
 | [`c-shared/`](c-shared/) | The `libkvlite` embedded FFI contract | `capi` |
-| [`bindings/`](bindings/) | PHP, Python, Node.js, and Rust language packages | HTTP, Redis, or C ABI |
+| [`bindings/`](bindings/) | Go, PHP, Python, Node.js, and Rust language packages | Installed C ABI or optional transports |
 | [`../extensions/rocksdb/`](../extensions/rocksdb/) | Optional RocksDB storage-driver extension | `extensions/rocksdb` |
 | [`../extensions/leveldb/`](../extensions/leveldb/) | Optional pure-Go LevelDB storage-driver extension | `extensions/leveldb` |
 | [`../extensions/berkeleydb/`](../extensions/berkeleydb/) | Optional Berkeley DB CGo storage-driver extension | Not bundled; application owner supplies a licensed library |

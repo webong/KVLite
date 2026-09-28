@@ -10,6 +10,22 @@ permissions:
   contents: read
 
 jobs:
+  go:
+    name: Go C ABI binding (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Test standalone Go module
+        working-directory: lib/bindings/go
+        run: GOWORK=off go test -race ./...
+
   php:
     name: PHP FFI binding
     runs-on: ubuntu-24.04
@@ -50,4 +66,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p kvlite
+      - run: cargo test --manifest-path lib/bindings/rust/Cargo.toml
+
+  package-preview:
+    name: Package release candidates
+    needs: [go, php, python, node, rust]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 -m unittest scripts/test_stage_language_bindings.py
+      - run: python3 -m pip install build
+      - name: Stage and package all five bindings
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/kvlite-cargo-target
+        run: |
+          python3 scripts/stage-language-bindings.py v0.1.0 "$RUNNER_TEMP/kvlite-bindings" --pypi-name usekvlite
+          bash scripts/package-language-bindings.sh "$RUNNER_TEMP/kvlite-bindings" "$RUNNER_TEMP/kvlite-distributions"

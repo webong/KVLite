@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kvlite"
+name = "usekvlite"
 version = "0.1.0.dev0"
 description = "Embedded and HTTP Python client for KVLite"
 readme = "README.md"

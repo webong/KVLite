@@ -10,20 +10,21 @@ load, and resolves a matching library in this order:
 3. the selected driver (or sole installed bundle) in `KVLITE_HOME`, each
    `KVLITE_SYSTEM_MODULE_PATH` catalog, and standard user/system catalogs
    such as `~/.local/lib/kvlite` and `/usr/local/lib/kvlite`; then
-4. a matching `native/<os>-<arch>` package asset or local `dist/dev` driver
-   bundle.
+4. for PHP/Python/Node/Rust, a matching `native/<os>-<arch>` package asset or
+   local `dist/dev` driver bundle.
 
-The same installed driver catalog serves the CLI and all four embedded
+The same installed driver catalog serves the CLI and all five embedded
 bindings. A default-prefix online installation needs no per-language library
 path; a custom prefix uses its `lib/kvlite` catalog in
 `KVLITE_SYSTEM_MODULE_PATH`.
 
 | Directory | Package name | Local API | Remote API | Binding test |
 | --- | --- | --- | --- | --- |
+| [`go/`](go/) | `github.com/webong/kvlite-go` | cgo dynamic C ABI | CLI or optional transport | `GOWORK=off go test ./...` inside `go/` |
 | [`php/`](php/) | `webong/kvlite` | PHP FFI | JSON/HTTP | `composer --working-dir=lib/bindings/php test` |
-| [`python/`](python/) | `kvlite` | `ctypes` | JSON/HTTP | `bash lib/bindings/python/tests/run.sh` |
+| [`python/`](python/) | `usekvlite` (`import kvlite`) | `ctypes` | JSON/HTTP | `bash lib/bindings/python/tests/run.sh` |
 | [`node/`](node/) | `@webong/kvlite` | N-API loader | JSON/HTTP | `npm --prefix lib/bindings/node test` |
-| [`rust/`](rust/) | `kvlite` | `libloading` | OpenAPI/Redis boundary | `cargo test -p kvlite` |
+| [`rust/`](rust/) | `kvlite` | `libloading` | OpenAPI/Redis boundary | `cargo test --manifest-path lib/bindings/rust/Cargo.toml` |
 
 Use `open()` only when one process owns the selected local driver directory.
 Embedded `open()` APIs accept an optional driver name such as `leveldb`; when
@@ -41,10 +42,55 @@ listener.
 
 The wrappers serialize normal values as JSON and each native wrapper also has a
 raw byte API for applications that choose MessagePack, protobuf, or another
-codec. Packages are source-ready for Composer, PyPI, npm, and crates.io, but
-are not yet claimed as published registry packages. Release CI builds a
+codec. Packages are source-ready for a dedicated Go module, Composer, PyPI,
+npm, and crates.io, but are not yet published. Release CI builds a
 self-contained RocksDB runtime bundle on Linux and macOS; real release assets
 and registry publication still need validation. LevelDB is pure
 Go inside KVLite, but its embedded selection still requires a current
 driver bundle exporting `kvlite_open_with_driver` (or the ABI-compatible
 `kvlite_open_with_backend` alias).
+
+## Release CI
+
+The pull-request binding workflow tests all five packages, stages source-only
+release trees, and checks the Go module, Composer, wheel/sdist, npm tarball, and crate
+packages. On a stable `vX.Y.Z` tag, `release-artifacts.yml` first requires
+the native Linux/macOS artifact matrix to pass. It retests the bindings,
+builds matching packages from a temporary copy, and uploads package artifacts
+before verifying all three native tarballs and creating one GitHub Release.
+Registry jobs run only after that release is created. Existing releases are
+never replaced, and the tagged source tree is never changed to stamp versions.
+
+Registry publication is separately opt-in. All variables below default to
+disabled; enable one only after its destination and protected GitHub
+environment are ready:
+
+| Destination | Repository variable | One-time setup |
+| --- | --- | --- |
+| Go `github.com/webong/kvlite-go` | `KVLITE_PUBLISH_GO=true` | Create an empty dedicated repository, set `KVLITE_GO_SPLIT_REPO=webong/kvlite-go` and a repository-scoped `KVLITE_GO_SPLIT_TOKEN` secret. Protect the `go-module` environment. CI mirrors the binding subtree and tag; the Go module proxy can then index that repository. |
+| PyPI `usekvlite` | `KVLITE_PUBLISH_PYPI=true` | Configure a PyPI trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `pypi`. |
+| npm `@webong/kvlite` | `KVLITE_PUBLISH_NPM=true` | Own the `@webong` scope and configure its npm trusted publisher for the same workflow and environment `npm`. |
+| crates.io `kvlite` | `KVLITE_PUBLISH_CRATES=true` | Confirm ownership of the crate name, bootstrap its first release manually, then configure crates.io trusted publishing for environment `crates-io`. |
+| Packagist `webong/kvlite` | `KVLITE_PUBLISH_PHP=true` | Create an empty dedicated PHP repository, set `KVLITE_PHP_SPLIT_REPO=webong/<repo>` and a repository-scoped `KVLITE_PHP_SPLIT_TOKEN` secret, then register that repository on Packagist with its GitHub update hook. |
+
+Registry setup references: [PyPI trusted publishers](https://docs.pypi.org/trusted-publishers/),
+[npm trusted publishers](https://docs.npmjs.com/trusted-publishers/),
+[crates.io trusted publishing](https://crates.io/docs/trusted-publishing), and
+[Packagist package registration](https://packagist.org/about).
+
+Go modules and Packagist both need their package metadata at repository root,
+so the Go and PHP jobs mirror their respective binding subtrees into dedicated
+repositories. Packagist reads `composer.json` from the repository root, so the PHP job
+mirrors the `lib/bindings/php` Git subtree to the dedicated repository's
+`main` branch and matching tag. The push is non-forced and fails rather than
+replacing a prior release. The other jobs use OIDC instead of registry tokens.
+Protect `v*` tags and require reviewers on the publishing environments
+before enabling the variables. Registry releases cannot be rolled back as one
+transaction: if one job fails after another succeeds, resolve it at that
+registry and do not reuse the same version blindly.
+
+The PyPI distribution is `usekvlite`, while Python imports `kvlite`.
+The bare `kvlite` PyPI project belongs to someone else. Package names and
+registry account ownership must be checked before the first publish; merely
+building an artifact does not reserve a name. The native driver bundle stays
+a separate install for embedded use.

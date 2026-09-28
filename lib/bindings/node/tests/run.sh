@@ -26,6 +26,9 @@ KVLITE_TEST_LIBRARY="$library" node "$package_dir/tests/finder.mjs"
 node_root="$(cd "$(dirname "$(node -p 'process.execPath')")/.." && pwd)"
 node_gyp="$node_root/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
 if [[ ! -f "$node_gyp" ]]; then
+  node_gyp="$(npm root -g)/npm/node_modules/node-gyp/bin/node-gyp.js"
+fi
+if [[ ! -f "$node_gyp" ]]; then
   echo "node-gyp is required to test the KVLite N-API extension" >&2
   exit 1
 fi

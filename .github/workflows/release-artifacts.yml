@@ -15,8 +15,6 @@ env:
 jobs:
   native-artifacts:
     name: ${{ matrix.target }}
-    permissions:
-      contents: write # attach release tarballs on tags
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +31,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Releases require a stable vX.Y.Z tag" >&2
+            exit 1
+          fi
 
       - uses: actions/setup-go@v5
         with:
@@ -136,6 +143,22 @@ jobs:
           make release-http RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}"
           make release-redis RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}"
 
+      - name: Go binding against the packaged LevelDB library
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
+            version="dev-${GITHUB_SHA:0:12}"
+          fi
+          target="${{ matrix.target }}"
+          library_name=libkvlite.so
+          if [[ "${RUNNER_OS}" == 'macOS' ]]; then
+            library_name=libkvlite.dylib
+          fi
+          export KVLITE_TEST_NATIVE_LIBRARY="$PWD/dist/$version/$target/drivers/leveldb/lib/$library_name"
+          export KVLITE_TEST_NATIVE_DRIVER=leveldb
+          (cd lib/bindings/go && GOWORK=off go test -run '^TestInstalledNativeLibrary$' -count=1 ./...)
+
       - name: Standalone extension integration (LevelDB)
         # Go hosts cannot load Go driver modules on Intel macOS (see
         # MODULES.md "Platform support"); builds and verification below
@@ -203,7 +226,7 @@ jobs:
           KVLITE_STANDALONE_TEST_VERSION=standalone-test-rocksdb \
             make test-standalone-modules
 
-      - name: Pack and publish release tarballs
+      - name: Pack release tarballs
         shell: bash
         run: |
           version="${GITHUB_REF_NAME}"
@@ -211,17 +234,256 @@ jobs:
             version="dev-${GITHUB_SHA:0:12}"
           fi
           make dist-tarballs RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}"
-          cp scripts/install-online.sh dist/kvlite-installer.sh
-          if [[ "${GITHUB_REF_TYPE}" == 'tag' ]]; then
-            gh release upload "${GITHUB_REF_NAME}" \
-              dist/kvlite-*.tar.gz dist/kvlite-*.tar.gz.sha256 dist/kvlite-installer.sh \
-              --clobber
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: kvlite-${{ matrix.target }}
           path: dist/*/${{ matrix.target }}
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kvlite-release-${{ matrix.target }}
+          path: |
+            dist/kvlite-*.tar.gz
+            dist/kvlite-*.tar.gz.sha256
+          if-no-files-found: error
+
+  github-release:
+    name: Publish verified GitHub Release
+    needs: [native-artifacts, binding-packages]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'webong/KVlite'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kvlite-release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify and publish all platform assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Releases require a stable vX.Y.Z tag" >&2
+            exit 1
+          fi
+          shopt -s nullglob
+          tarballs=(release-assets/kvlite-*.tar.gz)
+          checksums=(release-assets/kvlite-*.tar.gz.sha256)
+          if [[ ${#tarballs[@]} -ne 3 || ${#checksums[@]} -ne 3 ]]; then
+            echo "Expected three platform tarballs and matching checksums" >&2
+            exit 1
+          fi
+          (cd release-assets && sha256sum -c ./*.tar.gz.sha256)
+          cp scripts/install-online.sh release-assets/kvlite-installer.sh
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to replace immutable assets" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${tarballs[@]}" "${checksums[@]}" release-assets/kvlite-installer.sh --verify-tag --title "KVLite $GITHUB_REF_NAME" --generate-notes
+
+  binding-packages:
+    name: Build language packages
+    needs: native-artifacts
+    if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'webong/KVlite'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: ffi
+          tools: composer:v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Language package releases require a stable vX.Y.Z tag" >&2
+            exit 1
+          fi
+      - run: python3 -m unittest scripts/test_stage_language_bindings.py
+      - name: Test bindings from the tagged commit
+        shell: bash
+        run: |
+          (cd lib/bindings/go && GOWORK=off go test -race ./...)
+          composer --working-dir=lib/bindings/php test
+          bash lib/bindings/python/tests/run.sh
+          npm --prefix lib/bindings/node test
+          cargo test --manifest-path lib/bindings/rust/Cargo.toml
+      - run: python3 -m pip install build
+      - name: Stage and package release candidates
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/kvlite-cargo-target
+        run: |
+          python3 scripts/stage-language-bindings.py "$GITHUB_REF_NAME" "$RUNNER_TEMP/kvlite-bindings" --pypi-name usekvlite
+          bash scripts/package-language-bindings.sh "$RUNNER_TEMP/kvlite-bindings" "$RUNNER_TEMP/kvlite-distributions"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-go-source
+          path: ${{ runner.temp }}/kvlite-bindings/go
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-python
+          path: ${{ runner.temp }}/kvlite-distributions/python
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-node
+          path: ${{ runner.temp }}/kvlite-distributions/node
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-rust-source
+          path: ${{ runner.temp }}/kvlite-bindings/rust
+          if-no-files-found: error
+
+  publish-go:
+    name: Publish standalone Go module
+    needs: [binding-packages, github-release]
+    if: vars.KVLITE_PUBLISH_GO == 'true'
+    runs-on: ubuntu-24.04
+    environment: go-module
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push Go binding subtree without rewriting existing tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.KVLITE_GO_SPLIT_TOKEN }}
+          GO_SPLIT_REPO: ${{ vars.KVLITE_GO_SPLIT_REPO }}
+        run: |
+          if [[ "$GO_SPLIT_REPO" != 'webong/kvlite-go' ]]; then
+            echo "Set KVLITE_GO_SPLIT_REPO to webong/kvlite-go, matching go.mod" >&2
+            exit 1
+          fi
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "Set KVLITE_GO_SPLIT_TOKEN with write access to the Go binding repository" >&2
+            exit 1
+          fi
+          gh auth setup-git
+          split_sha="$(git subtree split --prefix=lib/bindings/go HEAD)"
+          git remote add go-binding "https://github.com/$GO_SPLIT_REPO.git"
+          git push --atomic go-binding "$split_sha:refs/heads/main" "$split_sha:refs/tags/$GITHUB_REF_NAME"
+
+  publish-python:
+    name: Publish usekvlite to PyPI
+    needs: [binding-packages, github-release]
+    if: vars.KVLITE_PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-python
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  publish-node:
+    name: Publish @webong/kvlite to npm
+    needs: [binding-packages, github-release]
+    if: vars.KVLITE_PUBLISH_NPM == 'true'
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-node
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global 'npm@^11.5.1'
+      - name: Publish the validated tarball
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(./dist/*.tgz)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "Expected exactly one npm package" >&2
+            exit 1
+          fi
+          npm publish "${packages[0]}" --access public
+
+  publish-rust:
+    name: Publish kvlite to crates.io
+    needs: [binding-packages, github-release]
+    if: vars.KVLITE_PUBLISH_CRATES == 'true'
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-rust-source
+          path: rust
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --manifest-path rust/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  publish-php:
+    name: Mirror PHP package for Packagist
+    needs: [binding-packages, github-release]
+    if: vars.KVLITE_PUBLISH_PHP == 'true'
+    runs-on: ubuntu-24.04
+    environment: packagist
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push PHP subtree without rewriting existing tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.KVLITE_PHP_SPLIT_TOKEN }}
+          PHP_SPLIT_REPO: ${{ vars.KVLITE_PHP_SPLIT_REPO }}
+        run: |
+          if [[ ! "$PHP_SPLIT_REPO" =~ ^webong/[A-Za-z0-9._-]+$ ]]; then
+            echo "Set KVLITE_PHP_SPLIT_REPO to the dedicated webong PHP repository" >&2
+            exit 1
+          fi
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "Set KVLITE_PHP_SPLIT_TOKEN with write access to that repository" >&2
+            exit 1
+          fi
+          gh auth setup-git
+          split_sha="$(git subtree split --prefix=lib/bindings/php HEAD)"
+          git remote add php "https://github.com/$PHP_SPLIT_REPO.git"
+          git push --atomic php "$split_sha:refs/heads/main" "$split_sha:refs/tags/$GITHUB_REF_NAME"

@@ -5,8 +5,9 @@ engine extensions—not dependencies pulled into every application. Each engine
 extension contains a driver implementation. The core provides serialization,
 per-record TTLs, collections, and metadata checks; HTTP and Redis
 are transport extensions, while the C ABI is an embedded boundary. Go
-is the implementation language, not the required application language: other
-languages use an optional server extension or a driver-specific C bundle.
+is the implementation language, not the required application language: Go and
+other languages can use thin bindings over an installed driver-specific C
+bundle, while optional server extensions provide HTTP and Redis access.
 
 KVLite owns the logical record model: namespaced keys, value envelopes,
 serialization, expiry, and collection behavior. Each engine extension stores
@@ -18,9 +19,8 @@ This repository is an MVP: the storage format is versioned and tested, while
 the public API is still free to evolve before a first stable release.
 
 See [MODULES.md](MODULES.md) for the standalone module catalog used by native
-bundles and optional transports. The normal Go blank-import path below remains
-the in-process development workflow; applications and language bindings should
-ultimately install prebuilt module artifacts rather than compile KVLite.
+bundles and optional transports. Install prebuilt native artifacts for ordinary
+use; the Go source-import path below is for building or extending KVLite itself.
 
 ## What is included
 
@@ -47,12 +47,38 @@ ultimately install prebuilt module artifacts rather than compile KVLite.
   by `extensions/http` and the server CLI.
 - An optional single-node Redis RESP2-compatible server extension for existing
   Redis clients and CLI tools.
-- First-class PHP, Python, Node.js, and Rust packages built on a small,
+- Thin Go, PHP, Python, Node.js, and Rust packages built on a small,
   versioned C ABI for embedded mode.
 
-## Install one driver
+## Use the distributed runtime
 
-The core module imports no storage engine. Pick one driver explicitly:
+KVLite's installed CLI and native driver bundles are the product. They are
+separate from the Go implementation source. Choose one storage extension when
+installing a bundle; use the CLI directly, or use a language binding that loads
+its `libkvlite` through the stable C ABI. None of these bindings imports the Go
+core module.
+
+The standalone Go binding lives at [`lib/bindings/go`](lib/bindings/go) and is
+prepared for its own `github.com/webong/kvlite-go` module repository. Its
+package import is only a thin Go interface, not the KVLite engine. For no Go
+package import at all, use the installed CLI or an optional transport.
+The registry packages and separate Go module are not yet published; see
+[`lib/bindings/README.md`](lib/bindings/README.md) for the CI release setup.
+
+The intended embedded Go application uses the installed native bundle, then:
+
+```go
+import kvlite "github.com/webong/kvlite-go"
+
+db, err := kvlite.Open("./app-data", kvlite.WithDriver("rocksdb"))
+```
+
+That import is a client binding, not the implementation module. The analogous
+PHP, Python, Node.js, and Rust bindings use the same installed C ABI.
+
+## Build the Go implementation from source
+
+The implementation core module imports no storage engine. Pick one driver explicitly:
 
 ```go
 import (
@@ -63,7 +89,8 @@ import (
 db, err := kvlite.Open("./app-data", kvlite.WithDriver("rocksdb"))
 ```
 
-Trying out the API with zero installs needs no import at all: core ships one
+Trying out the implementation without a storage-driver import uses the
+built-in memory engine: core ships one
 built-in driver, the ephemeral array-backed `memory` engine. Every `Open`
 gets a fresh, empty store and everything is lost on `Close` — it is for
 demos, tests, and throwaway work, never the system of record:
@@ -213,7 +240,7 @@ For ordinary consumer builds, prefer KVLite's released native library instead
 of relying on a system RocksDB installation. System RocksDB is an advanced mode
 and should stay within the tested range.
 
-## Basic usage
+## Source-level Go usage
 
 ```go
 package main
@@ -460,7 +487,7 @@ need the same database.
 | Language | Package | Embedded implementation | Remote implementation |
 | --- | --- | --- | --- |
 | PHP | `webong/kvlite` | PHP FFI | JSON/HTTP streams |
-| Python | `kvlite` | `ctypes` | `urllib` |
+| Python | `usekvlite` (`import kvlite`) | `ctypes` | `urllib` |
 | Node.js | `@webong/kvlite` | N-API dynamic loader | `fetch` |
 | Rust | `kvlite` | `libloading` | Use the OpenAPI or Redis client boundary |
 
@@ -476,7 +503,9 @@ server-owned mappings. The wrapper packages intentionally do not make a second
 copy of RocksDB. They can already be tested without RocksDB using an
 ABI-compatible mock. Release CI assembles a self-contained RocksDB runtime
 bundle on Linux and macOS; registry package publication and verification of
-a real release remain ahead.
+a real release remain ahead. The tag-triggered language package CI is prepared
+but registry publishing is opt-in until accounts, trusted publishers, and
+protected environments are configured; see the [binding release checklist](lib/bindings/README.md#release-ci).
 
 Run the real native integration check (build `libkvlite` against the pinned
 RocksDB container, then load it through Python `ctypes`) with:
