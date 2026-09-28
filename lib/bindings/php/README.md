@@ -1,6 +1,6 @@
-# `webong/kvlite` for PHP
+# `kvlite/kvlite` for PHP
 
-`webong/kvlite` gives PHP the same two choices as a SQLite-style library:
+`kvlite/kvlite` gives PHP the same two choices as a SQLite-style library:
 
 - `KVLite::open()` loads the local `libkvlite` shared library and opens the
   selected local backend in the current PHP process.
@@ -19,12 +19,12 @@ path repository:
 ```json
 {
   "repositories": [{"type": "path", "url": "../KVlite/lib/bindings/php", "options": {"symlink": true}}],
-  "require": {"webong/kvlite": "dev-main"}
+  "require": {"kvlite/kvlite": "dev-main"}
 }
 ```
 
 The package source is in `lib/bindings/php`; publishing will make the
-`webong/kvlite` Composer package.
+`kvlite/kvlite` Composer package, subject to Packagist name ownership.
 
 ## Embedded use
 
@@ -38,7 +38,7 @@ php -d ffi.enable=1 app.php
 ```
 
 ```php
-use Webong\KVLite\KVLite;
+use KVLite\KVLite;
 
 $db = KVLite::open(__DIR__.'/data', driver: 'leveldb');
 $db->put('user:101', ['id' => 101, 'name' => 'Ada'], ttlSeconds: 3600);

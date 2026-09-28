@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Webong\KVLite;
+namespace KVLite;
 
 /** A JSON-value KVLite connection, whether embedded or remote. */
 interface Store

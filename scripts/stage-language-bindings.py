@@ -19,7 +19,7 @@ PACKAGE_FILES = {
     "php": ("composer.json", "README.md", "src"),
     "python": ("pyproject.toml", "README.md", "src"),
     "node": ("package.json", "README.md", "binding.gyp", "native", "src"),
-    "ruby": ("webong-kvlite.gemspec", "README.md", "lib", "test"),
+    "ruby": ("kvlite.gemspec", "README.md", "lib", "test"),
     "rust": ("Cargo.toml", "README.md", "src"),
 }
 

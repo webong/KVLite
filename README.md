@@ -486,9 +486,9 @@ need the same database.
 
 | Language | Package | Embedded implementation | Remote implementation |
 | --- | --- | --- | --- |
-| PHP | `webong/kvlite` | PHP FFI | JSON/HTTP streams |
+| PHP | `kvlite/kvlite` | PHP FFI | JSON/HTTP streams |
 | Python | `usekvlite` (`import kvlite`) | `ctypes` | `urllib` |
-| Node.js | `@webong/kvlite` | N-API dynamic loader | `fetch` |
+| Node.js | `kvlite` | N-API dynamic loader | `fetch` |
 | Rust | `kvlite` | `libloading` | Use the OpenAPI or Redis client boundary |
 
 For now, build/download and install one matching driver bundle before calling

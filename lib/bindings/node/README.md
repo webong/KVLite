@@ -1,6 +1,6 @@
-# `@webong/kvlite` for Node.js
+# `kvlite` for Node.js
 
-`@webong/kvlite` offers an embedded N-API extension and a pure-JavaScript HTTP
+`kvlite` offers an embedded N-API extension and a pure-JavaScript HTTP
 client:
 
 - `open()` loads `libkvlite` into the current Node.js process, analogous to a
@@ -22,7 +22,7 @@ npm --prefix KVlite/lib/bindings/node run build:native
 ```
 
 The npm package itself is rooted at `lib/bindings/node`; publishing will make
-the normal package name `@webong/kvlite` available.
+the normal package name `kvlite` available, subject to registry ownership.
 
 ## Embedded use
 
@@ -37,7 +37,7 @@ npm run build:native
 ```
 
 ```js
-import { open } from '@webong/kvlite';
+import { open } from 'kvlite';
 
 const db = open('./data', { driver: 'leveldb' });
 db.put('user:101', { id: 101, name: 'Ada' }, { ttlSeconds: 3600 });
@@ -58,7 +58,7 @@ with `kvlite_open_with_driver` (or its compatible
 ## Remote use
 
 ```js
-import { connect } from '@webong/kvlite';
+import { connect } from 'kvlite';
 
 const db = connect('http://127.0.0.1:8089', {
   token: process.env.KVLITE_TOKEN,

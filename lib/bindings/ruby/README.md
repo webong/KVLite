@@ -1,6 +1,6 @@
 # KVLite for Ruby
 
-`webong-kvlite` is a thin Ruby gem over KVLite's installed runtime. It does not
+`kvlite` is a thin Ruby gem over KVLite's installed runtime. It does not
 build or import the Go engine. `KVLite.open` loads an installed `libkvlite`
 driver bundle through ABI v1 using Ruby's Fiddle; `KVLite.connect` uses the
 optional JSON/HTTP server with Ruby's standard library.
@@ -9,7 +9,7 @@ This gem is prepared for RubyGems release but is not published yet. After its
 first release, installation will be:
 
 ```bash
-gem install webong-kvlite
+gem install kvlite
 ```
 
 For embedded use, install a matching KVLite native driver bundle first. Its

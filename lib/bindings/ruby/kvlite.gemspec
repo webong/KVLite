@@ -1,7 +1,7 @@
 require_relative "lib/kvlite/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "webong-kvlite"
+  spec.name = "kvlite"
   spec.version = KVLite::VERSION
   spec.summary = "Embedded and HTTP Ruby client for KVLite"
   spec.description = "Thin Ruby binding for KVLite's versioned native C ABI and optional HTTP transport"

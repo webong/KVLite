@@ -20,7 +20,7 @@ python3 -m build --sdist --wheel "$staged/python" --outdir "$distributions/pytho
 npm pack "$staged/node" --pack-destination "$distributions/node"
 (cd "$staged/ruby" && ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |file| require File.expand_path(file) }')
 ruby_version="$(cd "$staged/ruby" && ruby -Ilib -rkvlite/version -e 'print KVLite::VERSION')"
-(cd "$staged/ruby" && gem build webong-kvlite.gemspec --strict --output "$distributions/ruby/webong-kvlite-${ruby_version}.gem")
+(cd "$staged/ruby" && gem build kvlite.gemspec --strict --output "$distributions/ruby/kvlite-${ruby_version}.gem")
 cargo package --manifest-path "$staged/rust/Cargo.toml" --allow-dirty
 
 shopt -s nullglob

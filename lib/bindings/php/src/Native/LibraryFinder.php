@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Webong\KVLite\Native;
+namespace KVLite\Native;
 
-use Webong\KVLite\Exception\NativeLibraryException;
+use KVLite\Exception\NativeLibraryException;
 
 final class LibraryFinder
 {

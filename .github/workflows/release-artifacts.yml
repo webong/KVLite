@@ -433,7 +433,7 @@ jobs:
           packages-dir: dist
 
   publish-node:
-    name: Publish @webong/kvlite to npm
+    name: Publish kvlite to npm
     needs: [binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_NPM == 'true'
     runs-on: ubuntu-24.04
@@ -464,7 +464,7 @@ jobs:
           npm publish "${packages[0]}" --access public
 
   publish-ruby:
-    name: Publish webong-kvlite to RubyGems
+    name: Publish kvlite to RubyGems
     needs: [binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_RUBY == 'true'
     runs-on: ubuntu-24.04
@@ -485,7 +485,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          packages=(./dist/webong-kvlite-*.gem)
+          packages=(./dist/kvlite-*.gem)
           if [[ ${#packages[@]} -ne 1 ]]; then
             echo "Expected exactly one Ruby gem" >&2
             exit 1
