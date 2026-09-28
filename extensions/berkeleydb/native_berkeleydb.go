@@ -256,7 +256,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func nativeAvailable() error { return nil }

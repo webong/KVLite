@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const defaultMaxRequestBytes int64 = 64 << 20

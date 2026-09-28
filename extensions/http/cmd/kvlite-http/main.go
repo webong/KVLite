@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
 )
 

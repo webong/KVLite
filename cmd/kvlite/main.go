@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const (

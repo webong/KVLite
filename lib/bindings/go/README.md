@@ -1,14 +1,15 @@
 # KVLite for Go
 
-This is the **Go binding**, not the KVLite engine. It dynamically loads an
-installed `libkvlite` bundle through KVLite's versioned C ABI. The Go module has
-no dependency on `github.com/webong/kvlite` or any storage-engine Go module.
+The repository-root `github.com/webong/kvlite` package is the **Go binding**,
+not the KVLite engine. It dynamically loads an installed `libkvlite` bundle
+through KVLite's versioned C ABI. It has no dependency on the unpublished
+`src/` implementation module or any storage-engine Go module.
 Go is one client language; KVLite's implementation is distributed separately.
 
-Once the separate `github.com/webong/kvlite-go` module repository is published:
+Once a versioned release is published from this repository:
 
 ```bash
-go get github.com/webong/kvlite-go@v0.1.0
+go get github.com/webong/kvlite@v0.1.0
 ```
 
 Install a matching KVLite native driver bundle first, or set
@@ -21,7 +22,7 @@ contains the storage implementation and any engine dependencies.
 import (
     "time"
 
-    kvlite "github.com/webong/kvlite-go"
+    kvlite "github.com/webong/kvlite"
 )
 
 db, err := kvlite.Open("./app-data", kvlite.WithDriver("rocksdb"))
@@ -41,7 +42,7 @@ when several processes need it.
 This first embedded Go binding supports cgo on Linux and macOS. On other
 targets, use the KVLite CLI or a separately installed HTTP/Redis transport until
 the platform's native loader has been implemented and tested. The mock ABI
-tests run without RocksDB or the core source:
+tests run from the repository root without RocksDB or the core source:
 
 ```bash
 GOWORK=off go test ./...

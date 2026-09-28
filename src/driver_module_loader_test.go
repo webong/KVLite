@@ -197,7 +197,8 @@ func testSharedLibraryName() string {
 
 func buildSharedLibrary(t *testing.T, out string) {
 	t.Helper()
-	cmd := exec.Command("go", "build", "-tags", "kvlite_leveldb", "-buildmode", "c-shared", "-o", out, "./capi")
+	cmd := exec.Command("go", "build", "-tags", "kvlite_leveldb", "-buildmode", "c-shared", "-o", out, ".")
+	cmd.Dir = filepath.Join("..", "capi")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build c-shared test module: %v: %s", err, output)

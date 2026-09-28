@@ -40,7 +40,7 @@ class StageLanguageBindingsTest(unittest.TestCase):
             self.assertTrue((output / "ruby" / "kvlite.gemspec").is_file())
             self.assertIn('spec.name = "kvlite"', (output / "ruby" / "kvlite.gemspec").read_text())
             self.assertTrue((output / "ruby" / "test" / "mock_kvlite.c").is_file())
-            self.assertIn("module github.com/webong/kvlite-go", (output / "go" / "go.mod").read_text())
+            self.assertIn("module github.com/webong/kvlite", (output / "go" / "go.mod").read_text())
             self.assertTrue((output / "go" / "testdata" / "mock_kvlite.c").is_file())
             self.assertTrue((output / "php" / "composer.json").is_file())
             self.assertTrue((output / "python" / "src" / "kvlite").is_dir())

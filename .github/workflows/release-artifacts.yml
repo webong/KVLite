@@ -132,7 +132,7 @@ jobs:
           # (deterministic bad-sweepgen fatal; ARM64/Linux tolerate it).
           # This mirrors product topology, where C++ lives inside driver
           # bundles and loading hosts stay lean.
-          go test . ./capi ./cmd/kvlite ./extensions/http/... ./extensions/redis/...
+          go test . ./src/... ./capi ./cmd/kvlite ./extensions/http/... ./extensions/redis/...
           go test -tags 'rocksdb,kvlite_rocksdb' ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
           make release RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}" DRIVER=none
           make release RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}" DRIVER=rocksdb
@@ -157,7 +157,7 @@ jobs:
           fi
           export KVLITE_TEST_NATIVE_LIBRARY="$PWD/dist/$version/$target/drivers/leveldb/lib/$library_name"
           export KVLITE_TEST_NATIVE_DRIVER=leveldb
-          (cd lib/bindings/go && GOWORK=off go test -run '^TestInstalledNativeLibrary$' -count=1 ./...)
+          GOWORK=off go test -run '^TestInstalledNativeLibrary$' -count=1 ./...
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -343,7 +343,7 @@ jobs:
       - name: Test bindings from the tagged commit
         shell: bash
         run: |
-          (cd lib/bindings/go && GOWORK=off go test -race ./...)
+          GOWORK=off go test -race ./...
           composer --working-dir=lib/bindings/php test
           bash lib/bindings/python/tests/run.sh
           npm --prefix lib/bindings/node test
@@ -382,37 +382,6 @@ jobs:
           name: binding-rust-source
           path: ${{ runner.temp }}/kvlite-bindings/rust
           if-no-files-found: error
-
-  publish-go:
-    name: Publish standalone Go module
-    needs: [binding-packages, github-release]
-    if: vars.KVLITE_PUBLISH_GO == 'true'
-    runs-on: ubuntu-24.04
-    environment: go-module
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Push Go binding subtree without rewriting existing tags
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.KVLITE_GO_SPLIT_TOKEN }}
-          GO_SPLIT_REPO: ${{ vars.KVLITE_GO_SPLIT_REPO }}
-        run: |
-          if [[ "$GO_SPLIT_REPO" != 'webong/kvlite-go' ]]; then
-            echo "Set KVLITE_GO_SPLIT_REPO to webong/kvlite-go, matching go.mod" >&2
-            exit 1
-          fi
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "Set KVLITE_GO_SPLIT_TOKEN with write access to the Go binding repository" >&2
-            exit 1
-          fi
-          gh auth setup-git
-          split_sha="$(git subtree split --prefix=lib/bindings/go HEAD)"
-          git remote add go-binding "https://github.com/$GO_SPLIT_REPO.git"
-          git push --atomic go-binding "$split_sha:refs/heads/main" "$split_sha:refs/tags/$GITHUB_REF_NAME"
 
   publish-python:
     name: Publish usekvlite to PyPI

@@ -438,7 +438,7 @@ func TestResolveModuleExecutable(t *testing.T) {
 }
 
 func TestSourceModuleManifestsAreDiscoverable(t *testing.T) {
-	modules, err := DiscoverModules("extensions")
+	modules, err := DiscoverModules(filepath.Join("..", "extensions"))
 	if err != nil {
 		t.Fatal(err)
 	}

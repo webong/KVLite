@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 // redisTransaction is a command-local overlay. Reads are cached, writes are

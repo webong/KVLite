@@ -53,6 +53,7 @@ WORKDIR /workspace
 # Keep dependency downloads in an early layer so source-only changes rebuild
 # quickly while still compiling against the pinned RocksDB headers and library.
 COPY go.work go.mod go.sum ./
+COPY src/go.mod ./src/
 COPY capi/go.mod capi/go.sum ./capi/
 COPY cmd/kvlite/go.mod cmd/kvlite/go.sum ./cmd/kvlite/
 COPY extensions/badgerdb/go.mod extensions/badgerdb/go.sum ./extensions/badgerdb/
@@ -65,6 +66,7 @@ COPY extensions/http/go.mod ./extensions/http/
 COPY extensions/redis/go.mod ./extensions/redis/
 COPY examples/basic/go.mod examples/basic/go.sum ./examples/basic/
 RUN go mod download \
+    && (cd src && go mod download) \
     && (cd capi && go mod download) \
     && (cd cmd/kvlite && go mod download) \
     && (cd extensions/badgerdb && go mod download) \
@@ -79,4 +81,4 @@ RUN go mod download \
 
 COPY . .
 
-CMD ["sh", "-c", "go test -tags 'rocksdb,kvlite_rocksdb' . ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic"]
+CMD ["sh", "-c", "go test -tags 'rocksdb,kvlite_rocksdb' . ./src/... ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic"]

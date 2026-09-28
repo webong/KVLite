@@ -7,7 +7,7 @@
 //	import _ "github.com/webong/kvlite/extensions/berkeleydb"
 package berkeleydb
 
-import "github.com/webong/kvlite"
+import "kvlite"
 
 // Name is the stable KVLite driver selection name.
 const Name kvlite.DriverName = kvlite.DriverBerkeleyDB

@@ -2,7 +2,7 @@
 
 package berkeleydb
 
-import "github.com/webong/kvlite"
+import "kvlite"
 
 func nativeAvailable() error {
 	return kvlite.ErrBerkeleyDBNotBuilt

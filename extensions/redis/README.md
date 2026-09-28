@@ -70,7 +70,7 @@ go get github.com/webong/kvlite/extensions/redis
 import (
     "log"
 
-    "github.com/webong/kvlite"
+    "kvlite"
     kvliteredis "github.com/webong/kvlite/extensions/redis"
     _ "github.com/webong/kvlite/extensions/leveldb"
 )

@@ -22,8 +22,7 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
-      - name: Test standalone Go module
-        working-directory: lib/bindings/go
+      - name: Test root Go binding module
         run: GOWORK=off go test -race ./...
 
   php:

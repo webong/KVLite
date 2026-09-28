@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/webong/kvlite"
-	"github.com/webong/kvlite/enginetest"
+	"kvlite"
+	"kvlite/enginetest"
 	_ "github.com/webong/kvlite/extensions/leveldb"
 )
 

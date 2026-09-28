@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	kvliteredis "github.com/webong/kvlite/extensions/redis"
 )
 

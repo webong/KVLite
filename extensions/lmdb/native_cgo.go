@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	native "github.com/PowerDNS/lmdb-go/lmdb"
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 // LMDB's map size is a virtual address-space reservation, not an immediate

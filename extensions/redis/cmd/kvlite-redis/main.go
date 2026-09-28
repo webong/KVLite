@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
 	kvliteredis "github.com/webong/kvlite/extensions/redis"
 )

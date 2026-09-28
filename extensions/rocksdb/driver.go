@@ -5,7 +5,7 @@
 //	import _ "github.com/webong/kvlite/extensions/rocksdb"
 package rocksdb
 
-import "github.com/webong/kvlite"
+import "kvlite"
 
 // Name is the stable KVLite driver selection name.
 const Name kvlite.DriverName = kvlite.DriverRocksDB

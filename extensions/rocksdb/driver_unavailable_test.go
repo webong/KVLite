@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	_ "github.com/webong/kvlite/extensions/rocksdb"
 )
 

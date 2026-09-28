@@ -14,7 +14,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 // Name is the stable KVLite driver selection name.

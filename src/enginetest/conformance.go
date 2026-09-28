@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 // RunAtomicMutations checks ordered raw batches and logical multi-record

@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/linxGnu/grocksdb"
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func nativeAvailable() error { return nil }

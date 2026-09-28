@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	bolt "go.etcd.io/bbolt"
 )
 

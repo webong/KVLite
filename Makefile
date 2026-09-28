@@ -17,19 +17,19 @@ DRIVER_CGO_ENV =
 endif
 
 test:
-	go test . ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
+	go test . ./src/... ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
 
 test-race:
-	go test -race . ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
+	go test -race . ./src/... ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
 
 test-rocksdb:
-	go test -tags 'rocksdb,kvlite_rocksdb' . ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
+	go test -tags 'rocksdb,kvlite_rocksdb' . ./src/... ./capi ./cmd/kvlite ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/... ./examples/basic
 
 # Berkeley DB is intentionally not part of the default or release suites.
 # Supply headers and a library from a Berkeley DB distribution you are licensed
 # to use, for example CGO_CFLAGS=-I... CGO_LDFLAGS=-L.../lib -ldb.
 test-berkeleydb:
-	CGO_CFLAGS="$(BERKELEYDB_CFLAGS)" CGO_LDFLAGS="$(BERKELEYDB_LDFLAGS)" go test -tags 'berkeleydb,kvlite_berkeleydb' . ./capi ./cmd/kvlite ./extensions/berkeleydb/...
+	CGO_CFLAGS="$(BERKELEYDB_CFLAGS)" CGO_LDFLAGS="$(BERKELEYDB_LDFLAGS)" go test -tags 'berkeleydb,kvlite_berkeleydb' . ./src/... ./capi ./cmd/kvlite ./extensions/berkeleydb/...
 
 test-rocksdb-docker:
 	ROCKSDB_VERSION="$(ROCKSDB_VERSION)" bash ./scripts/test-rocksdb-docker.sh
@@ -51,7 +51,7 @@ test-bindings-leveldb:
 	bash ./scripts/test-bindings-leveldb.sh
 
 vet:
-	go vet . ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
+	go vet . ./src/... ./capi ./cmd/kvlite ./extensions/badgerdb/... ./extensions/berkeleydb/... ./extensions/boltdb/... ./extensions/leveldb/... ./extensions/lmdb/... ./extensions/rocksdb/... ./extensions/http/... ./extensions/redis/...
 
 build-cli:
 	mkdir -p dist

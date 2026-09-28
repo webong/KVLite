@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	"github.com/webong/kvlite/extensions/leveldb"
 )
 

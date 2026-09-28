@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const (

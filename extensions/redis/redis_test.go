@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
 )
 

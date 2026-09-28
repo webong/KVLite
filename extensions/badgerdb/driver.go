@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const Name kvlite.DriverName = kvlite.DriverBadgerDB

@@ -13,7 +13,7 @@ VERSION_PATTERN = re.compile(r"^v?((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1
 PYPI_NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 PACKAGE_FILES = {
     "go": (
-        "go.mod", "README.md", "db.go", "db_test.go", "native_unix.go",
+        "go.mod", "db.go", "db_test.go", "native_unix.go",
         "native_unix_test.go", "native_unsupported.go", "testdata",
     ),
     "php": ("composer.json", "README.md", "src"),
@@ -48,7 +48,7 @@ def stage(version: str, pypi_name: str, output: Path) -> None:
     release_version = match.group(1)
     output.mkdir(parents=True, exist_ok=False)
     for language, paths in PACKAGE_FILES.items():
-        source = ROOT / "lib" / "bindings" / language
+        source = ROOT if language == "go" else ROOT / "lib" / "bindings" / language
         destination = output / language
         destination.mkdir()
         for relative in paths:
@@ -58,6 +58,8 @@ def stage(version: str, pypi_name: str, output: Path) -> None:
                 shutil.copytree(from_path, to_path)
             else:
                 shutil.copy2(from_path, to_path)
+        if language == "go":
+            shutil.copy2(ROOT / "lib" / "bindings" / "go" / "README.md", destination / "README.md")
         shutil.copy2(ROOT / "LICENSE", destination / "LICENSE")
 
     shutil.copy2(ROOT / "lib" / "bindings" / "test-fixtures" / "mock_kvlite.c", output / "ruby" / "test" / "mock_kvlite.c")

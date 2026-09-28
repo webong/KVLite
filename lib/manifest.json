@@ -79,8 +79,8 @@
   "bindings": [
     {
       "id": "go",
-      "source": "lib/bindings/go",
-      "package": "github.com/webong/kvlite-go",
+      "source": ".",
+      "package": "github.com/webong/kvlite",
       "transports": ["c-abi"]
     },
     {

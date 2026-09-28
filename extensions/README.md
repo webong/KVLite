@@ -1,8 +1,11 @@
 # KVLite extensions
 
-KVLite core is embedded by default and has no built-in storage engine or
-network listener. Every optional capability lives under this directory,
-including storage-engine drivers.
+KVLite core is embedded by default and has no built-in persistent storage
+engine or network listener. Every optional capability lives under this
+directory, including storage-engine drivers. The Go modules listed below are
+source-workspace components: they depend on the unpublished local `kvlite`
+module in `../src`. External applications use standalone native bundles
+instead of importing these implementation packages.
 
 | Extension | Kind | Go module | Notes |
 | --- | --- | --- | --- |
@@ -20,11 +23,12 @@ but a package may provide both an engine and a transport. An engine driver is se
 `WithDriver(...)`; HTTP and Redis are transport drivers that must be started
 explicitly and are not selected when opening a database.
 
-For an embedded LevelDB database, choose and link only the extension you need:
+When developing KVLite in this source workspace, choose and link only the
+extension you need for an embedded LevelDB database:
 
 ```go
 import (
-    "github.com/webong/kvlite"
+    "kvlite"
     _ "github.com/webong/kvlite/extensions/leveldb"
 )
 

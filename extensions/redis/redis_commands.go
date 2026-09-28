@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const (

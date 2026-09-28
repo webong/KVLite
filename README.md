@@ -60,17 +60,17 @@ installing a bundle; use the CLI directly, or use a language binding that loads
 its `libkvlite` through the stable C ABI. None of these bindings imports the Go
 core module.
 
-The standalone Go binding lives at [`lib/bindings/go`](lib/bindings/go) and is
-prepared for its own `github.com/webong/kvlite-go` module repository. Its
-package import is only a thin Go interface, not the KVLite engine. For no Go
-package import at all, use the installed CLI or an optional transport.
-The registry packages and separate Go module are not yet published; see
-[`lib/bindings/README.md`](lib/bindings/README.md) for the CI release setup.
+The repository-root `github.com/webong/kvlite` module is the thin Go binding,
+not the storage implementation. The implementation lives in the unpublished
+local [`src/`](src/) module named `kvlite`; it is not included in the root Go
+module. For no Go package import at all, use the installed CLI or an optional
+transport. Registry packages are not yet published; see
+[`lib/bindings/README.md`](lib/bindings/README.md) for the release setup.
 
 The intended embedded Go application uses the installed native bundle, then:
 
 ```go
-import kvlite "github.com/webong/kvlite-go"
+import kvlite "github.com/webong/kvlite"
 
 db, err := kvlite.Open("./app-data", kvlite.WithDriver("rocksdb"))
 ```
@@ -80,11 +80,13 @@ PHP, Python, Node.js, Ruby, and Rust bindings use the same installed C ABI.
 
 ## Build the Go implementation from source
 
-The implementation core module imports no storage engine. Pick one driver explicitly:
+The local `src/` implementation module imports no storage engine. Its import
+path is simply `kvlite` inside this source workspace; it is not a public Go
+package. Pick one driver explicitly when developing the implementation:
 
 ```go
 import (
-	"github.com/webong/kvlite"
+	"kvlite"
 	_ "github.com/webong/kvlite/extensions/rocksdb"
 )
 
@@ -252,7 +254,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	_ "github.com/webong/kvlite/extensions/rocksdb"
 )
 
@@ -448,7 +450,7 @@ import (
     "log"
     "os"
 
-    "github.com/webong/kvlite"
+    "kvlite"
     kvliteredis "github.com/webong/kvlite/extensions/redis"
     _ "github.com/webong/kvlite/extensions/rocksdb"
 )
@@ -613,7 +615,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	kvlitehttp "github.com/webong/kvlite/extensions/http"
 	_ "github.com/webong/kvlite/extensions/leveldb"
 	_ "github.com/webong/kvlite/extensions/rocksdb"

@@ -5,7 +5,7 @@ package lmdb
 import (
 	"fmt"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func nativeAvailable() error                   { return fmt.Errorf("kvlite: LMDB driver requires CGO_ENABLED=1") }

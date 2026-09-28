@@ -2,7 +2,7 @@
 
 package rocksdb
 
-import "github.com/webong/kvlite"
+import "kvlite"
 
 func nativeAvailable() error {
 	return kvlite.ErrRocksDBNotBuilt

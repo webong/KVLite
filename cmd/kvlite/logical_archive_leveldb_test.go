@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func TestArchiveCLIExportsAndImportsPersistentDatabase(t *testing.T) {

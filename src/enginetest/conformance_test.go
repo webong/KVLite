@@ -3,7 +3,7 @@ package enginetest
 import (
 	"testing"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func TestMemoryAtomicMutations(t *testing.T) {

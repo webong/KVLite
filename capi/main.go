@@ -26,7 +26,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 var databases = struct {

@@ -256,7 +256,7 @@ identity coupled.
 ```bash
 git status --short
 git log --oneline -n 5
-go test . ./cmd/kvlite ./extensions/leveldb/... ./extensions/http/... ./extensions/redis/...
+go test . ./src/... ./cmd/kvlite ./extensions/leveldb/... ./extensions/http/... ./extensions/redis/...
 sed -n '1,320p' scripts/build-release.sh
 sed -n '1,260p' MODULES.md
 ```

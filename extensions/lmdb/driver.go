@@ -2,7 +2,7 @@
 // uses the LMDB 0.9 C source bundled by github.com/PowerDNS/lmdb-go.
 package lmdb
 
-import "github.com/webong/kvlite"
+import "kvlite"
 
 const Name kvlite.DriverName = kvlite.DriverLMDB
 

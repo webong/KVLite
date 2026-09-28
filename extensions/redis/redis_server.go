@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func init() {

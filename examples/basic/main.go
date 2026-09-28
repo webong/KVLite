@@ -9,7 +9,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 type user struct {

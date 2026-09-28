@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const (

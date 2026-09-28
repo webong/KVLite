@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 	_ "github.com/webong/kvlite/extensions/lmdb"
 )
 

@@ -20,7 +20,7 @@ path; a custom prefix uses its `lib/kvlite` catalog in
 
 | Directory | Package name | Local API | Remote API | Binding test |
 | --- | --- | --- | --- | --- |
-| [`go/`](go/) | `github.com/webong/kvlite-go` | cgo dynamic C ABI | CLI or optional transport | `GOWORK=off go test ./...` inside `go/` |
+| [repository root](../../) | `github.com/webong/kvlite` | cgo dynamic C ABI | CLI or optional transport | `GOWORK=off go test ./...` at the root |
 | [`php/`](php/) | `kvlite/kvlite` (`KVLite\KVLite`) | PHP FFI | JSON/HTTP | `composer --working-dir=lib/bindings/php test` |
 | [`python/`](python/) | `usekvlite` (`import kvlite`) | `ctypes` | JSON/HTTP | `bash lib/bindings/python/tests/run.sh` |
 | [`node/`](node/) | `kvlite` | N-API loader | JSON/HTTP | `npm --prefix lib/bindings/node test` |
@@ -62,13 +62,14 @@ before verifying all three native tarballs and creating one GitHub Release.
 Registry jobs run only after that release is created. Existing releases are
 never replaced, and the tagged source tree is never changed to stamp versions.
 
-Registry publication is separately opt-in. All variables below default to
+Non-Go registry publication is separately opt-in. Those variables default to
 disabled; enable one only after its destination and protected GitHub
-environment are ready:
+environment are ready. The Go binding follows this repository's release tag
+directly:
 
 | Destination | Repository variable | One-time setup |
 | --- | --- | --- |
-| Go `github.com/webong/kvlite-go` | `KVLITE_PUBLISH_GO=true` | Create an empty dedicated repository, set `KVLITE_GO_SPLIT_REPO=webong/kvlite-go` and a repository-scoped `KVLITE_GO_SPLIT_TOKEN` secret. Protect the `go-module` environment. CI mirrors the binding subtree and tag; the Go module proxy can then index that repository. |
+| Go `github.com/webong/kvlite` | tagged repository root | No split repository or publishing token. The root module contains only the thin Go binding; `src/` is a separate unpublished module. Tag this repository after release checks pass so the Go module proxy can index it. |
 | PyPI `usekvlite` | `KVLITE_PUBLISH_PYPI=true` | Configure a PyPI trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `pypi`. |
 | npm `kvlite` | `KVLITE_PUBLISH_NPM=true` | Verify ownership of the unscoped name and configure its npm trusted publisher for the same workflow and environment `npm`. |
 | RubyGems `kvlite` | `KVLITE_PUBLISH_RUBY=true` | Verify ownership of the gem name, configure a pending RubyGems trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `rubygems`, then protect that environment. RubyGems uses OIDC; no registry token is stored. |
@@ -81,9 +82,8 @@ Registry setup references: [PyPI trusted publishers](https://docs.pypi.org/trust
 [crates.io trusted publishing](https://crates.io/docs/trusted-publishing), and
 [Packagist package registration](https://packagist.org/about).
 
-Go modules and Packagist both need their package metadata at repository root,
-so the Go and PHP jobs mirror their respective binding subtrees into dedicated
-repositories. Packagist reads `composer.json` from the repository root, so the PHP job
+The Go binding has its module metadata at this repository root. Packagist
+requires a separate repository root for its metadata, so the PHP job
 mirrors the `lib/bindings/php` Git subtree to the dedicated repository's
 `main` branch and matching tag. The push is non-forced and fails rather than
 replacing a prior release. The other jobs use OIDC instead of registry tokens.
@@ -94,8 +94,8 @@ registry and do not reuse the same version blindly.
 
 The public import/namespace is KVLite in every language. The Python install
 name remains `usekvlite` because the bare `kvlite` PyPI project belongs to
-someone else. Go modules require a repository locator, so the separate Go
-binding retains `github.com/webong/kvlite-go` while its package identifier is
+someone else. Go modules require a repository locator, so the root Go
+binding uses `github.com/webong/kvlite` while its package identifier is
 `kvlite`. Composer requires a vendor/package pair; `kvlite/kvlite` uses a
 product vendor rather than the repository owner's name. RubyGems, npm,
 Packagist, and crates.io names and registry account ownership must be checked

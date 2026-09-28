@@ -27,7 +27,7 @@ and exits with `Ctrl-C` when you stop ownership of the server.
 import (
     "context"
 
-    "github.com/webong/kvlite"
+    "kvlite"
     kvlitehttp "github.com/webong/kvlite/extensions/http"
     _ "github.com/webong/kvlite/extensions/leveldb"
 )

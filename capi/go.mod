@@ -3,7 +3,7 @@ module github.com/webong/kvlite/capi
 go 1.23.0
 
 require (
-	github.com/webong/kvlite v0.1.0
+	kvlite v0.1.0
 	github.com/webong/kvlite/extensions/badgerdb v0.1.0
 	github.com/webong/kvlite/extensions/berkeleydb v0.1.0
 	github.com/webong/kvlite/extensions/boltdb v0.1.0
@@ -35,7 +35,7 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 )
 
-replace github.com/webong/kvlite => ..
+replace kvlite => ../src
 
 replace github.com/webong/kvlite/extensions/badgerdb => ../extensions/badgerdb
 

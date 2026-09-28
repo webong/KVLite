@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 const recoveryPathEnv = "KVLITE_ENGINETEST_RECOVERY_PATH"

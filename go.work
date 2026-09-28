@@ -5,6 +5,7 @@ use (
 	./capi
 	./cmd/kvlite
 	./examples/basic
+	./src
 	./extensions/badgerdb
 	./extensions/berkeleydb
 	./extensions/boltdb
@@ -15,7 +16,6 @@ use (
 	./extensions/rocksdb
 )
 
-replace github.com/webong/kvlite v0.1.0 => .
 replace github.com/webong/kvlite/extensions/badgerdb v0.1.0 => ./extensions/badgerdb
 replace github.com/webong/kvlite/extensions/berkeleydb v0.1.0 => ./extensions/berkeleydb
 replace github.com/webong/kvlite/extensions/boltdb v0.1.0 => ./extensions/boltdb

@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	github.com/dgraph-io/badger/v4 v4.8.0
-	github.com/webong/kvlite v0.1.0
+	kvlite v0.1.0
 )
 
 require (
@@ -24,4 +24,4 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 )
 
-replace github.com/webong/kvlite => ../..
+replace kvlite => ../../src

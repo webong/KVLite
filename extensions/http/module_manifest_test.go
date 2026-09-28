@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/webong/kvlite"
+	"kvlite"
 )
 
 func TestModuleManifestMatchesLinkedMetadata(t *testing.T) {

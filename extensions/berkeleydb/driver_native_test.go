@@ -10,8 +10,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/webong/kvlite"
-	"github.com/webong/kvlite/enginetest"
+	"kvlite"
+	"kvlite/enginetest"
 	"github.com/webong/kvlite/extensions/berkeleydb"
 )
 
