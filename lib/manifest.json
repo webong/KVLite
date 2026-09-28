@@ -86,7 +86,7 @@
     {
       "id": "php",
       "source": "lib/bindings/php",
-      "package": "webong/kvlite",
+      "package": "kvlite/kvlite",
       "transports": ["c-abi", "http", "redis"]
     },
     {
@@ -98,7 +98,13 @@
     {
       "id": "node",
       "source": "lib/bindings/node",
-      "package": "@webong/kvlite",
+      "package": "kvlite",
+      "transports": ["c-abi", "http", "redis"]
+    },
+    {
+      "id": "ruby",
+      "source": "lib/bindings/ruby",
+      "package": "kvlite",
       "transports": ["c-abi", "http", "redis"]
     },
     {

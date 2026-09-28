@@ -60,6 +60,21 @@ jobs:
           node-version: '20'
       - run: npm --prefix lib/bindings/node test
 
+  ruby:
+    name: Ruby Fiddle binding (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Test standalone Ruby gem
+        working-directory: lib/bindings/ruby
+        run: ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |file| require File.expand_path(file) }'
+
   rust:
     name: Rust dynamic binding
     runs-on: ubuntu-24.04
@@ -70,7 +85,7 @@ jobs:
 
   package-preview:
     name: Package release candidates
-    needs: [go, php, python, node, rust]
+    needs: [go, php, python, node, ruby, rust]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +99,9 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -91,7 +109,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: python3 -m unittest scripts/test_stage_language_bindings.py
       - run: python3 -m pip install build
-      - name: Stage and package all five bindings
+      - name: Stage and package all six bindings
         shell: bash
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/kvlite-cargo-target

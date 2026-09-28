@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-use Webong\KVLite\KVLite;
+use KVLite\KVLite;
 
 $package = dirname(__DIR__);
 spl_autoload_register(static function (string $class) use ($package): void {
-    $prefix = 'Webong\\KVLite\\';
+    $prefix = 'KVLite\\';
     if (!str_starts_with($class, $prefix)) {
         return;
     }

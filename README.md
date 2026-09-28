@@ -49,7 +49,7 @@ use; the Go source-import path below is for building or extending KVLite itself.
   by `extensions/http` and the server CLI.
 - An optional single-node Redis RESP2-compatible server extension for existing
   Redis clients and CLI tools.
-- Thin Go, PHP, Python, Node.js, and Rust packages built on a small,
+- Thin Go, PHP, Python, Node.js, Ruby, and Rust packages built on a small,
   versioned C ABI for embedded mode.
 
 ## Use the distributed runtime
@@ -76,7 +76,7 @@ db, err := kvlite.Open("./app-data", kvlite.WithDriver("rocksdb"))
 ```
 
 That import is a client binding, not the implementation module. The analogous
-PHP, Python, Node.js, and Rust bindings use the same installed C ABI.
+PHP, Python, Node.js, Ruby, and Rust bindings use the same installed C ABI.
 
 ## Build the Go implementation from source
 
@@ -514,9 +514,9 @@ need the same database.
 
 | Language | Package | Embedded implementation | Remote implementation |
 | --- | --- | --- | --- |
-| PHP | `webong/kvlite` | PHP FFI | JSON/HTTP streams |
+| PHP | `kvlite/kvlite` | PHP FFI | JSON/HTTP streams |
 | Python | `usekvlite` (`import kvlite`) | `ctypes` | `urllib` |
-| Node.js | `@webong/kvlite` | N-API dynamic loader | `fetch` |
+| Node.js | `kvlite` | N-API dynamic loader | `fetch` |
 | Rust | `kvlite` | `libloading` | Use the OpenAPI or Redis client boundary |
 
 For now, build/download and install one matching driver bundle before calling

@@ -2,17 +2,17 @@
 
 declare(strict_types=1);
 
-namespace Webong\KVLite\Native;
+namespace KVLite\Native;
 
 use FFI;
 use FFI\CData;
 use Throwable;
-use Webong\KVLite\Exception\InvalidArgumentException;
-use Webong\KVLite\Exception\NativeLibraryException;
-use Webong\KVLite\Exception\NotFoundException;
-use Webong\KVLite\Exception\StorageException;
-use Webong\KVLite\JsonCodec;
-use Webong\KVLite\Store;
+use KVLite\Exception\InvalidArgumentException;
+use KVLite\Exception\NativeLibraryException;
+use KVLite\Exception\NotFoundException;
+use KVLite\Exception\StorageException;
+use KVLite\JsonCodec;
+use KVLite\Store;
 
 /**
  * Thin PHP FFI adapter over capi/kvlite.h. It owns one native DB handle and

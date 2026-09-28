@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Webong\KVLite;
+namespace KVLite;
 
-use Webong\KVLite\Exception\InvalidArgumentException;
-use Webong\KVLite\Exception\NotFoundException;
-use Webong\KVLite\Exception\StorageException;
+use KVLite\Exception\InvalidArgumentException;
+use KVLite\Exception\NotFoundException;
+use KVLite\Exception\StorageException;
 
 /** Pure-PHP client for the public JSON/HTTP KVLite protocol. */
 final class HttpDatabase implements Store

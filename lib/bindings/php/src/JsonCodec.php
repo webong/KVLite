@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Webong\KVLite;
+namespace KVLite;
 
 use JsonException;
-use Webong\KVLite\Exception\SerializationException;
+use KVLite\Exception\SerializationException;
 
 final class JsonCodec
 {

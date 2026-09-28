@@ -1,5 +1,5 @@
 {
-  "name": "webong/kvlite",
+  "name": "kvlite/kvlite",
   "description": "Embedded and HTTP PHP client for KVLite",
   "type": "library",
   "license": "MIT",
@@ -13,12 +13,12 @@
   },
   "autoload": {
     "psr-4": {
-      "Webong\\KVLite\\": "src/"
+      "KVLite\\": "src/"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "Webong\\KVLite\\Tests\\": "tests/"
+      "KVLite\\Tests\\": "tests/"
     }
   },
   "scripts": {

@@ -159,6 +159,24 @@ jobs:
           export KVLITE_TEST_NATIVE_DRIVER=leveldb
           (cd lib/bindings/go && GOWORK=off go test -run '^TestInstalledNativeLibrary$' -count=1 ./...)
 
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Ruby binding against the packaged LevelDB library
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
+            version="dev-${GITHUB_SHA:0:12}"
+          fi
+          target="${{ matrix.target }}"
+          library_name=libkvlite.so
+          if [[ "${RUNNER_OS}" == 'macOS' ]]; then
+            library_name=libkvlite.dylib
+          fi
+          export KVLITE_TEST_NATIVE_LIBRARY="$PWD/dist/$version/$target/drivers/leveldb/lib/$library_name"
+          (cd lib/bindings/ruby && ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |file| require File.expand_path(file) }')
+
       - name: Standalone extension integration (LevelDB)
         # Go hosts cannot load Go driver modules on Intel macOS (see
         # MODULES.md "Platform support"); builds and verification below
@@ -305,6 +323,9 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -326,6 +347,7 @@ jobs:
           composer --working-dir=lib/bindings/php test
           bash lib/bindings/python/tests/run.sh
           npm --prefix lib/bindings/node test
+          (cd lib/bindings/ruby && ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |file| require File.expand_path(file) }')
           cargo test --manifest-path lib/bindings/rust/Cargo.toml
       - run: python3 -m pip install build
       - name: Stage and package release candidates
@@ -349,6 +371,11 @@ jobs:
         with:
           name: binding-node
           path: ${{ runner.temp }}/kvlite-distributions/node
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-ruby
+          path: ${{ runner.temp }}/kvlite-distributions/ruby
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
@@ -406,7 +433,7 @@ jobs:
           packages-dir: dist
 
   publish-node:
-    name: Publish @webong/kvlite to npm
+    name: Publish kvlite to npm
     needs: [binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_NPM == 'true'
     runs-on: ubuntu-24.04
@@ -435,6 +462,35 @@ jobs:
             exit 1
           fi
           npm publish "${packages[0]}" --access public
+
+  publish-ruby:
+    name: Publish kvlite to RubyGems
+    needs: [binding-packages, github-release]
+    if: vars.KVLITE_PUBLISH_RUBY == 'true'
+    runs-on: ubuntu-24.04
+    environment: rubygems
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-ruby
+          path: dist
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+      - name: Publish the validated gem
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(./dist/kvlite-*.gem)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "Expected exactly one Ruby gem" >&2
+            exit 1
+          fi
+          gem push "${packages[0]}" --host https://rubygems.org
 
   publish-rust:
     name: Publish kvlite to crates.io

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Webong\KVLite;
+namespace KVLite;
 
-use Webong\KVLite\Native\NativeDatabase;
+use KVLite\Native\NativeDatabase;
 
 /** Entry points that mirror the familiar SQLite open/connect split. */
 final class KVLite

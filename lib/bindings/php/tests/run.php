@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-use Webong\KVLite\Exception\NotFoundException;
-use Webong\KVLite\HttpDatabase;
-use Webong\KVLite\KVLite;
-use Webong\KVLite\Native\LibraryFinder;
+use KVLite\Exception\NotFoundException;
+use KVLite\HttpDatabase;
+use KVLite\KVLite;
+use KVLite\Native\LibraryFinder;
 
 $package = dirname(__DIR__);
 spl_autoload_register(static function (string $class) use ($package): void {
-    $prefix = 'Webong\\KVLite\\';
+    $prefix = 'KVLite\\';
     if (!str_starts_with($class, $prefix)) {
         return;
     }
