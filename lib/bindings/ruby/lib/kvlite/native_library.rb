@@ -9,7 +9,8 @@ module KVLite
     MAX_TTL_SECONDS = (2**63 - 1) / 1_000_000_000
 
     def initialize(path)
-      @handle = Fiddle::Handle.new(path)
+      # Keep ABI symbols local so another KVLite library cannot intercept calls.
+      @handle = Fiddle::Handle.new(path, Fiddle::RTLD_NOW)
       # libkvlite is a Go c-shared library. Its runtime cannot be safely
       # unloaded while this process is alive, even after a DB handle closes.
       @handle.disable_close

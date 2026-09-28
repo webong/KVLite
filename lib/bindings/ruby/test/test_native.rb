@@ -30,6 +30,20 @@ class KVLiteNativeTest < Minitest::Test
     end
   end
 
+  def test_sequential_native_libraries_keep_their_database_handles_separate
+    with_mock_library("-DKVLITE_MOCK_LEGACY_ABI") do |legacy_library|
+      legacy_db = KVLite.open("legacy-db", library_path: legacy_library)
+      legacy_db.close
+
+      with_mock_library do |current_library|
+        db = KVLite.open("current-db", library_path: current_library, driver: "leveldb")
+        db.put("key", "value")
+        assert_equal "value", db.get("key")
+        db.close
+      end
+    end
+  end
+
   def test_catalog_discovery_and_input_validation
     with_mock_library do |library|
       Dir.mktmpdir("kvlite-ruby-catalog-") do |root|
