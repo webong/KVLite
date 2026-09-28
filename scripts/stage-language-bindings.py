@@ -19,6 +19,7 @@ PACKAGE_FILES = {
     "php": ("composer.json", "README.md", "src"),
     "python": ("pyproject.toml", "README.md", "src"),
     "node": ("package.json", "README.md", "binding.gyp", "native", "src"),
+    "ruby": ("webong-kvlite.gemspec", "README.md", "lib", "test"),
     "rust": ("Cargo.toml", "README.md", "src"),
 }
 
@@ -59,9 +60,16 @@ def stage(version: str, pypi_name: str, output: Path) -> None:
                 shutil.copy2(from_path, to_path)
         shutil.copy2(ROOT / "LICENSE", destination / "LICENSE")
 
+    shutil.copy2(ROOT / "lib" / "bindings" / "test-fixtures" / "mock_kvlite.c", output / "ruby" / "test" / "mock_kvlite.c")
+
     replace_toml_field(output / "python" / "pyproject.toml", "name", pypi_name)
     replace_toml_field(output / "python" / "pyproject.toml", "version", release_version)
     replace_toml_field(output / "rust" / "Cargo.toml", "version", release_version)
+    ruby_version = output / "ruby" / "lib" / "kvlite" / "version.rb"
+    updated, count = re.subn(r'(?m)^  VERSION = "[^"]+"$', f'  VERSION = "{release_version}"', ruby_version.read_text(), count=1)
+    if count != 1:
+        raise ValueError(f"expected one Ruby gem version in {ruby_version}")
+    ruby_version.write_text(updated)
     node_manifest = output / "node" / "package.json"
     node = json.loads(node_manifest.read_text())
     node["version"] = release_version

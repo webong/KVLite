@@ -13,7 +13,7 @@ load, and resolves a matching library in this order:
 4. for PHP/Python/Node/Rust, a matching `native/<os>-<arch>` package asset or
    local `dist/dev` driver bundle.
 
-The same installed driver catalog serves the CLI and all five embedded
+The same installed driver catalog serves the CLI and all six embedded
 bindings. A default-prefix online installation needs no per-language library
 path; a custom prefix uses its `lib/kvlite` catalog in
 `KVLITE_SYSTEM_MODULE_PATH`.
@@ -24,6 +24,7 @@ path; a custom prefix uses its `lib/kvlite` catalog in
 | [`php/`](php/) | `webong/kvlite` | PHP FFI | JSON/HTTP | `composer --working-dir=lib/bindings/php test` |
 | [`python/`](python/) | `usekvlite` (`import kvlite`) | `ctypes` | JSON/HTTP | `bash lib/bindings/python/tests/run.sh` |
 | [`node/`](node/) | `@webong/kvlite` | N-API loader | JSON/HTTP | `npm --prefix lib/bindings/node test` |
+| [`ruby/`](ruby/) | `webong-kvlite` (`require "kvlite"`) | Fiddle C ABI | JSON/HTTP | `ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |f| require File.expand_path(f) }'` inside `ruby/` |
 | [`rust/`](rust/) | `kvlite` | `libloading` | OpenAPI/Redis boundary | `cargo test --manifest-path lib/bindings/rust/Cargo.toml` |
 
 Use `open()` only when one process owns the selected local driver directory.
@@ -43,7 +44,7 @@ listener.
 The wrappers serialize normal values as JSON and each native wrapper also has a
 raw byte API for applications that choose MessagePack, protobuf, or another
 codec. Packages are source-ready for a dedicated Go module, Composer, PyPI,
-npm, and crates.io, but are not yet published. Release CI builds a
+npm, RubyGems, and crates.io, but are not yet published. Release CI builds a
 self-contained RocksDB runtime bundle on Linux and macOS; real release assets
 and registry publication still need validation. LevelDB is pure
 Go inside KVLite, but its embedded selection still requires a current
@@ -52,8 +53,8 @@ driver bundle exporting `kvlite_open_with_driver` (or the ABI-compatible
 
 ## Release CI
 
-The pull-request binding workflow tests all five packages, stages source-only
-release trees, and checks the Go module, Composer, wheel/sdist, npm tarball, and crate
+The pull-request binding workflow tests all six packages, stages source-only
+release trees, and checks the Go module, Composer, wheel/sdist, npm tarball, Ruby gem, and crate
 packages. On a stable `vX.Y.Z` tag, `release-artifacts.yml` first requires
 the native Linux/macOS artifact matrix to pass. It retests the bindings,
 builds matching packages from a temporary copy, and uploads package artifacts
@@ -70,11 +71,13 @@ environment are ready:
 | Go `github.com/webong/kvlite-go` | `KVLITE_PUBLISH_GO=true` | Create an empty dedicated repository, set `KVLITE_GO_SPLIT_REPO=webong/kvlite-go` and a repository-scoped `KVLITE_GO_SPLIT_TOKEN` secret. Protect the `go-module` environment. CI mirrors the binding subtree and tag; the Go module proxy can then index that repository. |
 | PyPI `usekvlite` | `KVLITE_PUBLISH_PYPI=true` | Configure a PyPI trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `pypi`. |
 | npm `@webong/kvlite` | `KVLITE_PUBLISH_NPM=true` | Own the `@webong` scope and configure its npm trusted publisher for the same workflow and environment `npm`. |
+| RubyGems `webong-kvlite` | `KVLITE_PUBLISH_RUBY=true` | Confirm the gem name, configure a pending RubyGems trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `rubygems`, then protect that environment. RubyGems uses OIDC; no registry token is stored. |
 | crates.io `kvlite` | `KVLITE_PUBLISH_CRATES=true` | Confirm ownership of the crate name, bootstrap its first release manually, then configure crates.io trusted publishing for environment `crates-io`. |
 | Packagist `webong/kvlite` | `KVLITE_PUBLISH_PHP=true` | Create an empty dedicated PHP repository, set `KVLITE_PHP_SPLIT_REPO=webong/<repo>` and a repository-scoped `KVLITE_PHP_SPLIT_TOKEN` secret, then register that repository on Packagist with its GitHub update hook. |
 
 Registry setup references: [PyPI trusted publishers](https://docs.pypi.org/trusted-publishers/),
 [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/),
+[RubyGems trusted publishing](https://guides.rubygems.org/trusted-publishing/),
 [crates.io trusted publishing](https://crates.io/docs/trusted-publishing), and
 [Packagist package registration](https://packagist.org/about).
 

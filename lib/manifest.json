@@ -102,6 +102,12 @@
       "transports": ["c-abi", "http", "redis"]
     },
     {
+      "id": "ruby",
+      "source": "lib/bindings/ruby",
+      "package": "webong-kvlite",
+      "transports": ["c-abi", "http", "redis"]
+    },
+    {
       "id": "rust",
       "source": "lib/bindings/rust",
       "package": "kvlite",
