@@ -6,10 +6,14 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("kvlite: key not found")
-	ErrClosed           = errors.New("kvlite: database is closed")
-	ErrInvalidArgument  = errors.New("kvlite: invalid argument")
-	ErrCodecUnavailable = errors.New("kvlite: value codec is unavailable")
+	ErrNotFound        = errors.New("kvlite: key not found")
+	ErrClosed          = errors.New("kvlite: database is closed")
+	ErrInvalidArgument = errors.New("kvlite: invalid argument")
+	// ErrUnsupportedOperation means this handle cannot provide the requested
+	// operation's guarantees (for example, owner-only archive operations on a
+	// remote transport handle).
+	ErrUnsupportedOperation = errors.New("kvlite: operation is not supported")
+	ErrCodecUnavailable     = errors.New("kvlite: value codec is unavailable")
 	// ErrDriverUnavailable means an installed driver cannot run in this build
 	// or server environment (for example, a RocksDB driver built without its
 	// native tag).

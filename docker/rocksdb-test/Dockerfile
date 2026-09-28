@@ -55,7 +55,11 @@ WORKDIR /workspace
 COPY go.work go.mod go.sum ./
 COPY capi/go.mod capi/go.sum ./capi/
 COPY cmd/kvlite/go.mod cmd/kvlite/go.sum ./cmd/kvlite/
+COPY extensions/badgerdb/go.mod extensions/badgerdb/go.sum ./extensions/badgerdb/
+COPY extensions/berkeleydb/go.mod ./extensions/berkeleydb/
+COPY extensions/boltdb/go.mod extensions/boltdb/go.sum ./extensions/boltdb/
 COPY extensions/leveldb/go.mod extensions/leveldb/go.sum ./extensions/leveldb/
+COPY extensions/lmdb/go.mod extensions/lmdb/go.sum ./extensions/lmdb/
 COPY extensions/rocksdb/go.mod extensions/rocksdb/go.sum ./extensions/rocksdb/
 COPY extensions/http/go.mod ./extensions/http/
 COPY extensions/redis/go.mod ./extensions/redis/
@@ -63,7 +67,11 @@ COPY examples/basic/go.mod examples/basic/go.sum ./examples/basic/
 RUN go mod download \
     && (cd capi && go mod download) \
     && (cd cmd/kvlite && go mod download) \
+    && (cd extensions/badgerdb && go mod download) \
+    && (cd extensions/berkeleydb && go mod download) \
+    && (cd extensions/boltdb && go mod download) \
     && (cd extensions/leveldb && go mod download) \
+    && (cd extensions/lmdb && go mod download) \
     && (cd extensions/rocksdb && go mod download) \
     && (cd extensions/http && go mod download) \
     && (cd extensions/redis && go mod download) \

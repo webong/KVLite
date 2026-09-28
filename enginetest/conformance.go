@@ -3,10 +3,12 @@
 package enginetest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/webong/kvlite"
 )
@@ -74,6 +76,67 @@ func RunAtomicMutations(t *testing.T, driver kvlite.DriverName) {
 	var value string
 	if err := db.Get(ctx, "roles", &value); err != nil || value != "scalar" {
 		t.Fatalf("Get replacement = %q, %v", value, err)
+	}
+}
+
+// RunLogicalArchiveMigration checks that the driver can import a KVLite
+// logical archive made by another engine and preserve it after reopening.
+func RunLogicalArchiveMigration(t *testing.T, driver kvlite.DriverName) {
+	t.Helper()
+	ctx := context.Background()
+	source, err := kvlite.Open(t.TempDir(), kvlite.WithDriver("memory"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Put(ctx, "user", map[string]string{"name": "Ada"}, kvlite.TTL(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.HSet(ctx, "profile", "name", "Ada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.SAdd(ctx, "roles", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.RPush(ctx, "jobs", "first", "second"); err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err := source.Export(ctx, &archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir()
+	destination, err := kvlite.Open(path, kvlite.WithDriver(string(driver)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := destination.Import(ctx, &archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := destination.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := kvlite.Open(path, kvlite.WithDriver(string(driver)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	var user map[string]string
+	if err := reopened.Get(ctx, "user", &user); err != nil || user["name"] != "Ada" {
+		t.Fatalf("reopened user = %#v, %v", user, err)
+	}
+	var fields map[string]string
+	if err := reopened.HGetAll(ctx, "profile", &fields); err != nil || fields["name"] != "Ada" {
+		t.Fatalf("reopened fields = %#v, %v", fields, err)
+	}
+	if members, err := reopened.SMembers(ctx, "roles"); err != nil || !slices.Equal(members, []string{"admin"}) {
+		t.Fatalf("reopened members = %#v, %v", members, err)
+	}
+	var jobs []string
+	if err := reopened.LRange(ctx, "jobs", 0, -1, &jobs); err != nil || !slices.Equal(jobs, []string{"first", "second"}) {
+		t.Fatalf("reopened jobs = %#v, %v", jobs, err)
 	}
 }
 

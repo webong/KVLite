@@ -21,6 +21,10 @@ func TestAtomicMutations(t *testing.T) {
 	enginetest.RunAtomicMutations(t, kvlite.DriverLMDB)
 }
 
+func TestLogicalArchiveMigration(t *testing.T) {
+	enginetest.RunLogicalArchiveMigration(t, kvlite.DriverLMDB)
+}
+
 func TestProcessExitRecovery(t *testing.T) {
 	enginetest.RunProcessExitRecovery(t, kvlite.DriverLMDB)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
@@ -71,6 +72,8 @@ func run(args []string) int {
 		return runDriver(args[1:])
 	case "module":
 		return runModule(args[1:])
+	case "export", "import":
+		return runArchive(args[0], args[1:])
 	case "serve":
 	default:
 		fmt.Fprintf(os.Stderr, "kvlite: unknown command %q\n", args[0])
@@ -236,6 +239,71 @@ func run(args []string) int {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
 	<-signals
+	return 0
+}
+
+func runArchive(action string, args []string) int {
+	flags := flag.NewFlagSet(action, flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	path := flags.String("path", "", "KVLite database directory")
+	driver := flags.String("driver", "", "installed storage driver")
+	var file *string
+	if action == "export" {
+		file = flags.String("output", "-", "archive file (default: stdout)")
+	} else {
+		file = flags.String("input", "-", "archive file (default: stdin)")
+	}
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *path == "" || *driver == "" || flags.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "kvlite: %s requires --path and --driver, with no positional arguments\n", action)
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	db, err := kvlite.Open(*path, kvlite.WithDriver(*driver))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kvlite: %s: %v\n", action, err)
+		return 1
+	}
+	defer db.Close()
+	if action == "export" {
+		out := os.Stdout
+		created := false
+		if *file != "-" {
+			out, err = os.OpenFile(*file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "kvlite: export: %v\n", err)
+				return 1
+			}
+			created = true
+		}
+		err = db.Export(ctx, out)
+		if created {
+			if err == nil {
+				err = out.Sync()
+			}
+			if closeErr := out.Close(); err == nil {
+				err = closeErr
+			}
+		}
+	} else {
+		in := os.Stdin
+		if *file != "-" {
+			in, err = os.Open(*file)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "kvlite: import: %v\n", err)
+				return 1
+			}
+			defer in.Close()
+		}
+		err = db.Import(ctx, in)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kvlite: %s: %v\n", action, err)
+		return 1
+	}
 	return 0
 }
 
@@ -748,6 +816,8 @@ func runModuleRun(args []string) int {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage: kvlite serve --path DIR [--driver NAME] [--driver-path NAME=DIR] [--listen HOST:PORT] [--token TOKEN] [--redis-listen HOST:PORT] [--redis-password PASSWORD] [--extension-mode auto|linked|standalone]")
+	fmt.Fprintln(os.Stderr, "       kvlite export --path DIR --driver NAME [--output FILE|-]")
+	fmt.Fprintln(os.Stderr, "       kvlite import --path EMPTY_DIR --driver NAME [--input FILE|-]")
 	fmt.Fprintln(os.Stderr, "       kvlite driver list")
 	fmt.Fprintln(os.Stderr, "       kvlite module list|run <name> [args...]|verify [NAME]")
 	fmt.Fprintln(os.Stderr, "\nDefaults prefer linked extensions, and fall back to standalone module binaries when auto-linked extensions are missing.")

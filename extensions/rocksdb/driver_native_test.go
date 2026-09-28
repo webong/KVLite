@@ -18,6 +18,10 @@ func TestAtomicMutations(t *testing.T) {
 	enginetest.RunAtomicMutations(t, kvlite.DriverRocksDB)
 }
 
+func TestLogicalArchiveMigration(t *testing.T) {
+	enginetest.RunLogicalArchiveMigration(t, kvlite.DriverRocksDB)
+}
+
 func TestProcessExitRecovery(t *testing.T) {
 	enginetest.RunProcessExitRecovery(t, kvlite.DriverRocksDB)
 }

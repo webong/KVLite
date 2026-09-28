@@ -40,6 +40,33 @@ func TestRunRejectsUnavailableDriver(t *testing.T) {
 	}
 }
 
+func TestArchiveCommandsUseExplicitDriversAndDoNotOverwriteOutput(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "backup.kvlite.jsonl")
+	if got := run([]string{"export", "--path", t.TempDir(), "--output", archive}); got != 2 {
+		t.Fatalf("export without driver = %d, want 2", got)
+	}
+	if got := run([]string{"export", "--path", t.TempDir(), "--driver", "memory", "--output", archive}); got != 0 {
+		t.Fatalf("export = %d, want 0", got)
+	}
+	before, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(before), `"format":"kvlite-logical"`) {
+		t.Fatalf("export missing format header: %s", before)
+	}
+	if got := run([]string{"export", "--path", t.TempDir(), "--driver", "memory", "--output", archive}); got != 1 {
+		t.Fatalf("export over existing file = %d, want 1", got)
+	}
+	after, err := os.ReadFile(archive)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("existing archive changed: %v", err)
+	}
+	if got := run([]string{"import", "--path", t.TempDir(), "--driver", "memory", "--input", archive}); got != 0 {
+		t.Fatalf("import = %d, want 0", got)
+	}
+}
+
 func TestDriverPathValuesRejectDuplicateMappings(t *testing.T) {
 	var values driverPathValues
 	if err := values.Set("leveldb=./level"); err != nil {

@@ -43,6 +43,8 @@ use; the Go source-import path below is for building or extending KVLite itself.
   every backend still enforces TTL logically at read time.
 - A persistent driver manifest that prevents one engine from accidentally
   opening a KVLite directory initialized for another engine.
+- Versioned logical export/import for moving live values and collections
+  between engine extensions without copying engine-specific files.
 - A versioned, language-neutral JSON/HTTP API and OpenAPI description provided
   by `extensions/http` and the server CLI.
 - An optional single-node Redis RESP2-compatible server extension for existing
@@ -317,10 +319,36 @@ on-disk format: moving between engines requires a logical copy of records into
 a new KVLite path. A legacy KVLite RocksDB path without a manifest can be
 adopted by reopening it through the unchanged default `Open(path)` path.
 
-Logical export/import is planned, not implemented yet. Its future format will
-carry KVLite-level keys, collection types and members, codec identities, and
-expiry metadata—not physical RocksDB, LevelDB, or LMDB files. Import into
-another engine will create a new directory with that engine's manifest.
+## Migrate between engines
+
+Use a logical archive, not a copy of an engine's database directory:
+
+```sh
+kvlite export --path ./rocksdb-data --driver rocksdb --output ./data.kvlite.jsonl
+kvlite import --path ./new-leveldb-data --driver leveldb --input ./data.kvlite.jsonl
+```
+
+Both driver bundles must be installed for their respective commands. The
+archive is versioned newline-delimited JSON with base64-encoded binary keys and
+payloads, a record count, and a SHA-256 checksum. It carries scalar values,
+hash fields, set members, lists, codec names, and absolute expiry timestamps.
+Expiry nanoseconds are decimal strings so JavaScript JSON readers do not lose
+64-bit precision. See the [v1 archive format](protocol/logical-archive-v1.md).
+Expired data is omitted, including data that expires between export and import.
+The destination must be empty and gets its own engine manifest. The commands
+use stdin/stdout when `--input`/`--output` is omitted; an output file is created
+exclusively, never overwritten.
+If export fails, its incomplete output file remains for inspection; import
+rejects it because the end marker or checksum is missing.
+
+The same embedded operation is available as `db.Export(ctx, writer)` and
+`db.Import(ctx, reader)`. Remote handles cannot export/import yet. Quiesce other
+writers before export: the operation serializes writes through its own DB
+handle, but does not provide a snapshot across separate HTTP/Redis clients.
+Import verifies the whole archive before writing, then applies bounded batches.
+If an error occurs during those batches, the destination can be partial;
+discard that new destination and retry into another empty path. Do not serve
+the destination until import succeeds.
 
 ## Collections
 
