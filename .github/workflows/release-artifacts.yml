@@ -2,6 +2,8 @@ name: Build release artifacts
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
       - '!v*-canary.*'
@@ -40,7 +42,7 @@ jobs:
             fi
             version="$GITHUB_REF_NAME"
             channel=stable
-          elif [[ "$PUBLISH_CANARY" == "true" ]]; then
+          elif [[ "$GITHUB_EVENT_NAME" == "push" || "$PUBLISH_CANARY" == "true" ]]; then
             if [[ "$GITHUB_REF" != "refs/heads/main" || "$GITHUB_REPOSITORY" != "webong/KVLite" ]]; then
               echo "Canaries may only publish from webong/KVLite main" >&2
               exit 1

@@ -60,10 +60,10 @@ driver bundle exporting `kvlite_open_with_driver` (or the ABI-compatible
 
 The pull-request binding workflow tests all six packages, stages source-only
 release trees, and checks the Go module, Composer, wheel/sdist, npm tarball, Ruby gem, and crate
-packages. `release-artifacts.yml` accepts stable `vX.Y.Z` tags or a manual
-`publish_canary` dispatch from `main`. The canary uses an immutable
-`v0.1.0-canary.N` version and is a GitHub prerelease; it does not run on every
-push. Both channels require the native Linux/macOS artifact matrix to pass,
+packages. `release-artifacts.yml` accepts stable `vX.Y.Z` tags and creates a
+canary on every `main` push (or a manual `publish_canary` dispatch from `main`).
+The canary uses an immutable `v0.1.0-canary.N` version and is a GitHub prerelease.
+Both channels require the native Linux/macOS artifact matrix to pass,
 retest the bindings, stage packages in a temporary copy, and verify all three
 native tarballs. The GitHub Release carries native bundles and the built
 Python, npm, Ruby, and Rust packages. Registry jobs run only afterward and

@@ -17,8 +17,9 @@ curl -fsSL https://github.com/webong/KVlite/releases/latest/download/kvlite-inst
 
 The release workflow stamps the installer with its own version, so a script
 downloaded from a specific prerelease installs that same prerelease by default.
-To build a canary, manually run `Build release artifacts` on `main` with
-`publish_canary=true`. It creates a `v0.1.0-canary.N` GitHub prerelease only
+Every push to `main` builds a canary. You can also manually run
+`Build release artifacts` on `main` with `publish_canary=true`. It creates a
+`v0.1.0-canary.N` GitHub prerelease only
 after native and binding artifacts pass. Use that prerelease's
 `kvlite-installer.sh` URL to try it; a canary is not selected by GitHub's
 `releases/latest` URL. Registry uploads are separate opt-ins, not implied by
