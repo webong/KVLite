@@ -41,8 +41,8 @@ jobs:
             version="$GITHUB_REF_NAME"
             channel=stable
           elif [[ "$PUBLISH_CANARY" == "true" ]]; then
-            if [[ "$GITHUB_REF" != "refs/heads/main" || "$GITHUB_REPOSITORY" != "webong/KVlite" ]]; then
-              echo "Canaries may only publish from webong/KVlite main" >&2
+            if [[ "$GITHUB_REF" != "refs/heads/main" || "$GITHUB_REPOSITORY" != "webong/KVLite" ]]; then
+              echo "Canaries may only publish from webong/KVLite main" >&2
               exit 1
             fi
             if (( GITHUB_RUN_ATTEMPT > 99 )); then
@@ -294,7 +294,7 @@ jobs:
   github-release:
     name: Publish verified GitHub Release
     needs: [prepare, native-artifacts, binding-packages]
-    if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVlite'
+    if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVLite'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -362,7 +362,7 @@ jobs:
   binding-packages:
     name: Build language packages
     needs: [prepare, native-artifacts]
-    if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVlite'
+    if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVLite'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
