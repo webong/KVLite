@@ -1,0 +1,8 @@
+{
+  "name": "kvlite-embedded-node-example",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "kvlite": "file:../../../lib/bindings/node"
+  }
+}

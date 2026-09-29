@@ -79,6 +79,11 @@ db, err := kvlite.Open("./app-data", kvlite.WithDriver("rocksdb"))
 That import is a client binding, not the implementation module. The analogous
 PHP, Python, Node.js, Ruby, and Rust bindings use the same installed C ABI.
 
+See the [six embedded language examples](examples/embedded/README.md) for
+source-checkout setup and complete Go, PHP, Python, JavaScript, Ruby, and Rust
+programs. Each uses a thin binding, a separately installed driver bundle, and
+no HTTP or Redis listener.
+
 ## Build the Go implementation from source
 
 The local `src/` implementation module imports no storage engine. Its import

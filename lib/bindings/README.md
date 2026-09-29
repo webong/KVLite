@@ -41,6 +41,11 @@ The HTTP and Redis services are explicit server extensions linked by `kvlite
 serve`; the embedded C ABI used by `open()` does not include or start either
 listener.
 
+For runnable, same-shape embedded programs in all six languages, start with
+[`../../examples/embedded/`](../../examples/embedded/README.md). The examples
+build a LevelDB driver bundle from this checkout and show typed JSON, TTL, and
+raw bytes through each binding.
+
 The wrappers serialize normal values as JSON and each native wrapper also has a
 raw byte API for applications that choose MessagePack, protobuf, or another
 codec. Packages are source-ready for a dedicated Go module, Composer, PyPI,

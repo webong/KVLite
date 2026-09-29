@@ -1,0 +1,6 @@
+**/data/
+go/kvlite-embedded-go-example
+node/node_modules/
+node/package-lock.json
+php/vendor/
+php/composer.lock

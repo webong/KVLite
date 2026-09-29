@@ -1,0 +1,14 @@
+{
+  "name": "kvlite/embedded-php-example",
+  "description": "Embedded KVLite PHP example from the source checkout",
+  "type": "project",
+  "license": "MIT",
+  "repositories": [
+    {"type": "path", "url": "../../../lib/bindings/php", "options": {"symlink": true}},
+    {"packagist.org": false}
+  ],
+  "require": {
+    "php": "^8.1",
+    "kvlite/kvlite": "dev-main"
+  }
+}

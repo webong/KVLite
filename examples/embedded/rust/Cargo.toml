@@ -1,0 +1,11 @@
+[package]
+name = "kvlite-embedded-rust-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+kvlite = { path = "../../../lib/bindings/rust" }
+serde = { version = "1", features = ["derive"] }
+
+[workspace]
