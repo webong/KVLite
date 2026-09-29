@@ -4,17 +4,64 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v*-canary.*'
   workflow_dispatch:
+    inputs:
+      publish_canary:
+        description: Publish a prerelease from main after all artifacts pass
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
 
 env:
   ROCKSDB_VERSION: v10.8.3
+  NEXT_RELEASE_VERSION: 0.1.0
 
 jobs:
+  prepare:
+    name: Select release channel and immutable version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - id: version
+        shell: bash
+        env:
+          PUBLISH_CANARY: ${{ inputs.publish_canary }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Stable releases require a vX.Y.Z tag" >&2
+              exit 1
+            fi
+            version="$GITHUB_REF_NAME"
+            channel=stable
+          elif [[ "$PUBLISH_CANARY" == "true" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" || "$GITHUB_REPOSITORY" != "webong/KVlite" ]]; then
+              echo "Canaries may only publish from webong/KVlite main" >&2
+              exit 1
+            fi
+            if (( GITHUB_RUN_ATTEMPT > 99 )); then
+              echo "Canary run attempt exceeds the version sequence range" >&2
+              exit 1
+            fi
+            sequence=$((GITHUB_RUN_ID * 100 + GITHUB_RUN_ATTEMPT))
+            version="v${NEXT_RELEASE_VERSION}-canary.${sequence}"
+            channel=canary
+          else
+            version="dev-${GITHUB_SHA:0:12}"
+            channel=build
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
   native-artifacts:
     name: ${{ matrix.target }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -31,15 +78,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate release tag
-        if: github.ref_type == 'tag'
-        shell: bash
-        run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Releases require a stable vX.Y.Z tag" >&2
-            exit 1
-          fi
 
       - uses: actions/setup-go@v5
         with:
@@ -122,10 +160,7 @@ jobs:
             export LD_LIBRARY_PATH="${KVLITE_ROCKSDB_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           fi
 
-          version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
-            version="dev-${GITHUB_SHA:0:12}"
-          fi
+          version="${{ needs.prepare.outputs.version }}"
           # Core first WITHOUT the RocksDB tags: its driver-loader tests dlopen
           # freshly built Go shared libraries, and a C++-linked (RocksDB)
           # host corrupts the loaded module's heap on Intel macOS
@@ -147,10 +182,7 @@ jobs:
         if: matrix.target != 'darwin-amd64'
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
-            version="dev-${GITHUB_SHA:0:12}"
-          fi
+          version="${{ needs.prepare.outputs.version }}"
           target="${{ matrix.target }}"
           library_name=libkvlite.so
           if [[ "${RUNNER_OS}" == 'macOS' ]]; then
@@ -167,10 +199,7 @@ jobs:
       - name: Ruby binding against the packaged LevelDB library
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
-            version="dev-${GITHUB_SHA:0:12}"
-          fi
+          version="${{ needs.prepare.outputs.version }}"
           target="${{ matrix.target }}"
           library_name=libkvlite.so
           if [[ "${RUNNER_OS}" == 'macOS' ]]; then
@@ -196,10 +225,7 @@ jobs:
           for notice in "${notices}"/*; do
             notice_args+=(--notice-file "$notice")
           done
-          version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
-            version="dev-${GITHUB_SHA:0:12}"
-          fi
+          version="${{ needs.prepare.outputs.version }}"
           if [[ "${RUNNER_OS}" == 'Linux' ]]; then
             sudo apt-get update && sudo apt-get install --yes patchelf
             export LD_LIBRARY_PATH="${KVLITE_ROCKSDB_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
@@ -249,10 +275,7 @@ jobs:
       - name: Pack release tarballs
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != 'tag' ]]; then
-            version="dev-${GITHUB_SHA:0:12}"
-          fi
+          version="${{ needs.prepare.outputs.version }}"
           make dist-tarballs RELEASE_VERSION="$version" RELEASE_TARGET="${{ matrix.target }}"
 
       - uses: actions/upload-artifact@v4
@@ -270,8 +293,8 @@ jobs:
 
   github-release:
     name: Publish verified GitHub Release
-    needs: [native-artifacts, binding-packages]
-    if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'webong/KVlite'
+    needs: [prepare, native-artifacts, binding-packages]
+    if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVlite'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -282,15 +305,29 @@ jobs:
           pattern: kvlite-release-*
           path: release-assets
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-python
+          path: release-assets/bindings/python
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-node
+          path: release-assets/bindings/node
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-ruby
+          path: release-assets/bindings/ruby
+      - uses: actions/download-artifact@v4
+        with:
+          name: binding-rust
+          path: release-assets/bindings/rust
       - name: Verify and publish all platform assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Releases require a stable vX.Y.Z tag" >&2
-            exit 1
-          fi
           shopt -s nullglob
           tarballs=(release-assets/kvlite-*.tar.gz)
           checksums=(release-assets/kvlite-*.tar.gz.sha256)
@@ -299,17 +336,33 @@ jobs:
             exit 1
           fi
           (cd release-assets && sha256sum -c ./*.tar.gz.sha256)
-          cp scripts/install-online.sh release-assets/kvlite-installer.sh
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          packages=(release-assets/bindings/*/*)
+          if [[ ${#packages[@]} -ne 5 ]]; then
+            echo "Expected Python wheel/sdist, npm tarball, Ruby gem, and Rust crate" >&2
+            exit 1
+          fi
+          if [[ $(grep -c '^version="latest"$' scripts/install-online.sh) -ne 1 ]]; then
+            echo "Installer default-version marker missing" >&2
+            exit 1
+          fi
+          sed "s/^version=\"latest\"$/version=\"$RELEASE_VERSION\"/" \
+            scripts/install-online.sh > release-assets/kvlite-installer.sh
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "Release already exists; refusing to replace immutable assets" >&2
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" "${tarballs[@]}" "${checksums[@]}" release-assets/kvlite-installer.sh --verify-tag --title "KVLite $GITHUB_REF_NAME" --generate-notes
+          release_flags=(--title "KVLite $RELEASE_VERSION" --generate-notes)
+          if [[ "$RELEASE_CHANNEL" == 'stable' ]]; then
+            release_flags+=(--verify-tag)
+          else
+            release_flags+=(--prerelease --target "$GITHUB_SHA")
+          fi
+          gh release create "$RELEASE_VERSION" "${tarballs[@]}" "${checksums[@]}" "${packages[@]}" release-assets/kvlite-installer.sh "${release_flags[@]}"
 
   binding-packages:
     name: Build language packages
-    needs: native-artifacts
-    if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'webong/KVlite'
+    needs: [prepare, native-artifacts]
+    if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVlite'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -334,15 +387,8 @@ jobs:
           extensions: ffi
           tools: composer:v2
       - uses: dtolnay/rust-toolchain@stable
-      - name: Verify release tag
-        shell: bash
-        run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Language package releases require a stable vX.Y.Z tag" >&2
-            exit 1
-          fi
       - run: python3 -m unittest scripts/test_stage_language_bindings.py
-      - name: Test bindings from the tagged commit
+      - name: Test bindings from the release commit
         shell: bash
         run: |
           GOWORK=off go test -race ./...
@@ -357,7 +403,7 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/kvlite-cargo-target
         run: |
-          python3 scripts/stage-language-bindings.py "$GITHUB_REF_NAME" "$RUNNER_TEMP/kvlite-bindings" --pypi-name usekvlite
+          python3 scripts/stage-language-bindings.py "${{ needs.prepare.outputs.version }}" "$RUNNER_TEMP/kvlite-bindings" --pypi-name usekvlite
           bash scripts/package-language-bindings.sh "$RUNNER_TEMP/kvlite-bindings" "$RUNNER_TEMP/kvlite-distributions"
       - uses: actions/upload-artifact@v4
         with:
@@ -384,10 +430,15 @@ jobs:
           name: binding-rust-source
           path: ${{ runner.temp }}/kvlite-bindings/rust
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binding-rust
+          path: ${{ runner.temp }}/kvlite-distributions/rust
+          if-no-files-found: error
 
   publish-python:
     name: Publish usekvlite to PyPI
-    needs: [binding-packages, github-release]
+    needs: [prepare, binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_PYPI == 'true'
     runs-on: ubuntu-24.04
     environment: pypi
@@ -404,8 +455,8 @@ jobs:
           packages-dir: dist
 
   publish-node:
-    name: Publish kvlite to npm
-    needs: [binding-packages, github-release]
+    name: Publish usekvlite to npm
+    needs: [prepare, binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_NPM == 'true'
     runs-on: ubuntu-24.04
     environment: npm
@@ -425,6 +476,8 @@ jobs:
       - run: npm install --global 'npm@^11.5.1'
       - name: Publish the validated tarball
         shell: bash
+        env:
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           shopt -s nullglob
           packages=(./dist/*.tgz)
@@ -432,11 +485,15 @@ jobs:
             echo "Expected exactly one npm package" >&2
             exit 1
           fi
-          npm publish "${packages[0]}" --access public
+          publish_flags=(--access public)
+          if [[ "$RELEASE_CHANNEL" == 'canary' ]]; then
+            publish_flags+=(--tag canary)
+          fi
+          npm publish "${packages[0]}" "${publish_flags[@]}"
 
   publish-ruby:
     name: Publish kvlite to RubyGems
-    needs: [binding-packages, github-release]
+    needs: [prepare, binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_RUBY == 'true'
     runs-on: ubuntu-24.04
     environment: rubygems
@@ -464,8 +521,8 @@ jobs:
           gem push "${packages[0]}" --host https://rubygems.org
 
   publish-rust:
-    name: Publish kvlite to crates.io
-    needs: [binding-packages, github-release]
+    name: Publish usekvlite to crates.io
+    needs: [prepare, binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_CRATES == 'true'
     runs-on: ubuntu-24.04
     environment: crates-io
@@ -486,7 +543,7 @@ jobs:
 
   publish-php:
     name: Mirror PHP package for Packagist
-    needs: [binding-packages, github-release]
+    needs: [prepare, binding-packages, github-release]
     if: vars.KVLITE_PUBLISH_PHP == 'true'
     runs-on: ubuntu-24.04
     environment: packagist
@@ -501,6 +558,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.KVLITE_PHP_SPLIT_TOKEN }}
           PHP_SPLIT_REPO: ${{ vars.KVLITE_PHP_SPLIT_REPO }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           if [[ ! "$PHP_SPLIT_REPO" =~ ^webong/[A-Za-z0-9._-]+$ ]]; then
             echo "Set KVLITE_PHP_SPLIT_REPO to the dedicated webong PHP repository" >&2
@@ -513,4 +572,8 @@ jobs:
           gh auth setup-git
           split_sha="$(git subtree split --prefix=lib/bindings/php HEAD)"
           git remote add php "https://github.com/$PHP_SPLIT_REPO.git"
-          git push --atomic php "$split_sha:refs/heads/main" "$split_sha:refs/tags/$GITHUB_REF_NAME"
+          if [[ "$RELEASE_CHANNEL" == 'canary' ]]; then
+            git push php "$split_sha:refs/heads/main"
+          else
+            git push --atomic php "$split_sha:refs/heads/main" "$split_sha:refs/tags/$RELEASE_VERSION"
+          fi

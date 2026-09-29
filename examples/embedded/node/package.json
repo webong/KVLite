@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "kvlite": "file:../../../lib/bindings/node"
+    "usekvlite": "file:../../../lib/bindings/node"
   }
 }

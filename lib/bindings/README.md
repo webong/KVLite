@@ -23,9 +23,9 @@ path; a custom prefix uses its `lib/kvlite` catalog in
 | [repository root](../../) | `github.com/webong/kvlite` | cgo dynamic C ABI | CLI or optional transport | `GOWORK=off go test ./...` at the root |
 | [`php/`](php/) | `kvlite/kvlite` (`KVLite\KVLite`) | PHP FFI | JSON/HTTP | `composer --working-dir=lib/bindings/php test` |
 | [`python/`](python/) | `usekvlite` (`import kvlite`) | `ctypes` | JSON/HTTP | `bash lib/bindings/python/tests/run.sh` |
-| [`node/`](node/) | `kvlite` | N-API loader | JSON/HTTP | `npm --prefix lib/bindings/node test` |
+| [`node/`](node/) | `usekvlite` | N-API loader | JSON/HTTP | `npm --prefix lib/bindings/node test` |
 | [`ruby/`](ruby/) | `kvlite` (`require "kvlite"`) | Fiddle C ABI | JSON/HTTP | `ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |f| require File.expand_path(f) }'` inside `ruby/` |
-| [`rust/`](rust/) | `kvlite` | `libloading` | OpenAPI/Redis boundary | `cargo test --manifest-path lib/bindings/rust/Cargo.toml` |
+| [`rust/`](rust/) | `usekvlite` (`use kvlite`) | `libloading` | OpenAPI/Redis boundary | `cargo test --manifest-path lib/bindings/rust/Cargo.toml` |
 
 Use `open()` only when one process owns the selected local driver directory.
 Embedded `open()` APIs accept an optional driver name such as `leveldb`; when
@@ -60,26 +60,30 @@ driver bundle exporting `kvlite_open_with_driver` (or the ABI-compatible
 
 The pull-request binding workflow tests all six packages, stages source-only
 release trees, and checks the Go module, Composer, wheel/sdist, npm tarball, Ruby gem, and crate
-packages. On a stable `vX.Y.Z` tag, `release-artifacts.yml` first requires
-the native Linux/macOS artifact matrix to pass. It retests the bindings,
-builds matching packages from a temporary copy, and uploads package artifacts
-before verifying all three native tarballs and creating one GitHub Release.
-Registry jobs run only after that release is created. Existing releases are
-never replaced, and the tagged source tree is never changed to stamp versions.
+packages. `release-artifacts.yml` accepts stable `vX.Y.Z` tags or a manual
+`publish_canary` dispatch from `main`. The canary uses an immutable
+`v0.1.0-canary.N` version and is a GitHub prerelease; it does not run on every
+push. Both channels require the native Linux/macOS artifact matrix to pass,
+retest the bindings, stage packages in a temporary copy, and verify all three
+native tarballs. The GitHub Release carries native bundles and the built
+Python, npm, Ruby, and Rust packages. Registry jobs run only afterward and
+only when separately enabled. Existing releases are never replaced; source
+files are not edited to stamp versions.
 
 Non-Go registry publication is separately opt-in. Those variables default to
 disabled; enable one only after its destination and protected GitHub
-environment are ready. The Go binding follows this repository's release tag
-directly:
+environment are ready. On canaries, npm uses the `canary` dist-tag, Python a
+`.devN` version, Ruby a prerelease version, Rust a SemVer prerelease, and PHP
+the `dev-main` split branch. The Go binding follows the release tag directly:
 
 | Destination | Repository variable | One-time setup |
 | --- | --- | --- |
 | Go `github.com/webong/kvlite` | tagged repository root | No split repository or publishing token. The root module contains only the thin Go binding; `src/` is a separate unpublished module. Tag this repository after release checks pass so the Go module proxy can index it. |
 | PyPI `usekvlite` | `KVLITE_PUBLISH_PYPI=true` | Configure a PyPI trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `pypi`. |
-| npm `kvlite` | `KVLITE_PUBLISH_NPM=true` | Verify ownership of the unscoped name and configure its npm trusted publisher for the same workflow and environment `npm`. |
+| npm `usekvlite` | `KVLITE_PUBLISH_NPM=true` | The unscoped `kvlite` name belongs to an unrelated project. `usekvlite` returned 404 on 2026-09-29 but is not reserved; establish ownership before enabling publication. |
 | RubyGems `kvlite` | `KVLITE_PUBLISH_RUBY=true` | Verify ownership of the gem name, configure a pending RubyGems trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `rubygems`, then protect that environment. RubyGems uses OIDC; no registry token is stored. |
-| crates.io `kvlite` | `KVLITE_PUBLISH_CRATES=true` | Confirm ownership of the crate name, bootstrap its first release manually, then configure crates.io trusted publishing for environment `crates-io`. |
-| Packagist `kvlite/kvlite` | `KVLITE_PUBLISH_PHP=true` | Verify name ownership, create an empty dedicated PHP repository, set `KVLITE_PHP_SPLIT_REPO=webong/<repo>` and a repository-scoped `KVLITE_PHP_SPLIT_TOKEN` secret, then register that repository on Packagist with its GitHub update hook. The GitHub owner need not match the Composer vendor. |
+| crates.io `usekvlite` | `KVLITE_PUBLISH_CRATES=true` | The `kvlite` crate belongs to an unrelated project. `usekvlite` returned 404 on 2026-09-29 but is not reserved; bootstrap its first release manually, then configure crates.io trusted publishing for environment `crates-io`. |
+| Packagist `kvlite/kvlite` | `KVLITE_PUBLISH_PHP=true` | Verify name ownership, create a dedicated PHP repository, set `KVLITE_PHP_SPLIT_REPO=webong/<repo>` and a repository-scoped `KVLITE_PHP_SPLIT_TOKEN` secret. Register it on Packagist after the PHP subtree has supplied a root `composer.json`. The GitHub owner need not match the Composer vendor. |
 
 Registry setup references: [PyPI trusted publishers](https://docs.pypi.org/trusted-publishers/),
 [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/),
@@ -97,12 +101,12 @@ before enabling the variables. Registry releases cannot be rolled back as one
 transaction: if one job fails after another succeeds, resolve it at that
 registry and do not reuse the same version blindly.
 
-The public import/namespace is KVLite in every language. The Python install
-name remains `usekvlite` because the bare `kvlite` PyPI project belongs to
+The public API is KVLite in every language, although package-manager names
+vary. The Python install name remains `usekvlite` because the bare `kvlite` PyPI project belongs to
 someone else. Go modules require a repository locator, so the root Go
 binding uses `github.com/webong/kvlite` while its package identifier is
 `kvlite`. Composer requires a vendor/package pair; `kvlite/kvlite` uses a
-product vendor rather than the repository owner's name. RubyGems, npm,
-Packagist, and crates.io names and registry account ownership must be checked
-before the first publish; building an artifact does not reserve a name. The
+product vendor rather than the repository owner's name. RubyGems, Packagist,
+and selected npm/crates.io names and account ownership must be checked before
+the first publish; building an artifact does not reserve a name. The
 native driver bundle stays a separate install for embedded use.

@@ -31,8 +31,10 @@ class StageLanguageBindingsTest(unittest.TestCase):
             self.assertEqual(python["project"]["name"], "usekvlite")
             self.assertEqual(python["project"]["version"], "1.2.3")
             self.assertEqual(rust["package"]["version"], "1.2.3")
+            self.assertEqual(rust["package"]["name"], "usekvlite")
+            self.assertEqual(rust["lib"]["name"], "kvlite")
             self.assertEqual(node["version"], "1.2.3")
-            self.assertEqual(node["name"], "kvlite")
+            self.assertEqual(node["name"], "usekvlite")
             self.assertEqual(php["name"], "kvlite/kvlite")
             for language in ("go", "php", "python", "node", "ruby", "rust"):
                 self.assertTrue((output / language / "LICENSE").is_file())
@@ -52,6 +54,27 @@ class StageLanguageBindingsTest(unittest.TestCase):
             output = Path(temporary) / "bindings"
             for version, name in (("v1.2.3-beta", "usekvlite"), ("v01.2.3", "usekvlite"), ("v1.2.3", "kvlite")):
                 result = self.run_stage(version, output, name)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists())
+
+    def test_stages_canary_with_registry_specific_prerelease_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "bindings"
+            result = self.run_stage("v0.1.0-canary.12345", output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            python = tomllib.loads((output / "python" / "pyproject.toml").read_text())
+            rust = tomllib.loads((output / "rust" / "Cargo.toml").read_text())
+            node = json.loads((output / "node" / "package.json").read_text())
+            self.assertEqual(python["project"]["version"], "0.1.0.dev12345")
+            self.assertEqual(rust["package"]["version"], "0.1.0-canary.12345")
+            self.assertEqual(node["version"], "0.1.0-canary.12345")
+            self.assertIn('VERSION = "0.1.0.pre.canary.12345"', (output / "ruby" / "lib" / "kvlite" / "version.rb").read_text())
+
+    def test_rejects_zero_and_non_numeric_canary_sequences(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            for version in ("v0.1.0-canary.0", "v0.1.0-canary.01", "v0.1.0-canary.x"):
+                output = Path(temporary) / "bindings"
+                result = self.run_stage(version, output)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(output.exists())
 

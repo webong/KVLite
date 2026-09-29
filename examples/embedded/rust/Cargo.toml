@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-kvlite = { path = "../../../lib/bindings/rust" }
+usekvlite = { path = "../../../lib/bindings/rust" }
 serde = { version = "1", features = ["derive"] }
 
 [workspace]

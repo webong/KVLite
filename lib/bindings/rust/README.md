@@ -1,4 +1,4 @@
-# `kvlite` for Rust
+# `usekvlite` for Rust (`use kvlite`)
 
 The Rust crate is a small, safe wrapper over the stable KVLite C ABI. It
 dynamically loads `libkvlite`, so it behaves like a local embedded database
@@ -10,12 +10,18 @@ its optional Redis endpoint instead.
 
 ## Install
 
-Until the crate is published on crates.io, use the public Git repository with
-the Rust package directory:
+The crates.io name `kvlite` already belongs to an unrelated project. This
+binding's selected package name is `usekvlite`, but it is not yet published;
+do not use `cargo add kvlite` for this KVLite. Its library crate remains
+`kvlite`, so Rust source can continue using `use kvlite`. See the
+[publishing plan](../../../packaging/PUBLISHING-RESEARCH.md).
+
+Until publication, use the public Git repository with the Rust package
+directory:
 
 ```toml
 [dependencies]
-kvlite = { git = "https://github.com/webong/KVlite", package = "kvlite" }
+usekvlite = { git = "https://github.com/webong/KVlite" }
 ```
 
 ## Embedded use

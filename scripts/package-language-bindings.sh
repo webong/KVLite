@@ -24,7 +24,7 @@ ruby_version="$(cd "$staged/ruby" && ruby -Ilib -rkvlite/version -e 'print KVLit
 cargo package --manifest-path "$staged/rust/Cargo.toml" --allow-dirty
 
 shopt -s nullglob
-crates=("$CARGO_TARGET_DIR"/package/kvlite-*.crate)
+crates=("$CARGO_TARGET_DIR"/package/usekvlite-*.crate)
 if [[ ${#crates[@]} -ne 1 ]]; then
   echo "expected one packaged KVLite crate in $CARGO_TARGET_DIR/package" >&2
   exit 1

@@ -98,7 +98,7 @@
     {
       "id": "node",
       "source": "lib/bindings/node",
-      "package": "kvlite",
+      "package": "usekvlite",
       "transports": ["c-abi", "http", "redis"]
     },
     {
@@ -110,7 +110,7 @@
     {
       "id": "rust",
       "source": "lib/bindings/rust",
-      "package": "kvlite",
+      "package": "usekvlite",
       "transports": ["c-abi", "http", "redis"]
     }
   ],

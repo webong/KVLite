@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION_PATTERN = re.compile(r"^v?((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$")
+BASE_VERSION = r"((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))"
+VERSION_PATTERN = re.compile(rf"^v?{BASE_VERSION}$")
+CANARY_VERSION_PATTERN = re.compile(rf"^v?{BASE_VERSION}-canary\.([1-9][0-9]*)$")
 PYPI_NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 PACKAGE_FILES = {
     "go": (
@@ -38,14 +40,24 @@ def replace_toml_field(path: Path, field: str, value: str) -> None:
 
 
 def stage(version: str, pypi_name: str, output: Path) -> None:
-    match = VERSION_PATTERN.fullmatch(version)
-    if not match:
-        raise ValueError("version must be a stable tag such as v0.1.0")
+    stable_match = VERSION_PATTERN.fullmatch(version)
+    canary_match = CANARY_VERSION_PATTERN.fullmatch(version)
+    if not stable_match and not canary_match:
+        raise ValueError("version must be a stable tag (v0.1.0) or canary (v0.1.0-canary.123)")
     if not PYPI_NAME_PATTERN.fullmatch(pypi_name):
         raise ValueError("invalid PyPI distribution name")
     if re.sub(r"[-_.]+", "-", pypi_name).lower() == "kvlite":
         raise ValueError("PyPI distribution 'kvlite' belongs to another project")
-    release_version = match.group(1)
+    base_version = (stable_match or canary_match).group(1)
+    if canary_match:
+        sequence = canary_match.group(2)
+        release_version = f"{base_version}-canary.{sequence}"
+        python_version = f"{base_version}.dev{sequence}"
+        ruby_version = f"{base_version}.pre.canary.{sequence}"
+    else:
+        release_version = base_version
+        python_version = base_version
+        ruby_version = base_version
     output.mkdir(parents=True, exist_ok=False)
     for language, paths in PACKAGE_FILES.items():
         source = ROOT if language == "go" else ROOT / "lib" / "bindings" / language
@@ -65,13 +77,13 @@ def stage(version: str, pypi_name: str, output: Path) -> None:
     shutil.copy2(ROOT / "lib" / "bindings" / "test-fixtures" / "mock_kvlite.c", output / "ruby" / "test" / "mock_kvlite.c")
 
     replace_toml_field(output / "python" / "pyproject.toml", "name", pypi_name)
-    replace_toml_field(output / "python" / "pyproject.toml", "version", release_version)
+    replace_toml_field(output / "python" / "pyproject.toml", "version", python_version)
     replace_toml_field(output / "rust" / "Cargo.toml", "version", release_version)
-    ruby_version = output / "ruby" / "lib" / "kvlite" / "version.rb"
-    updated, count = re.subn(r'(?m)^  VERSION = "[^"]+"$', f'  VERSION = "{release_version}"', ruby_version.read_text(), count=1)
+    ruby_version_file = output / "ruby" / "lib" / "kvlite" / "version.rb"
+    updated, count = re.subn(r'(?m)^  VERSION = "[^"]+"$', f'  VERSION = "{ruby_version}"', ruby_version_file.read_text(), count=1)
     if count != 1:
-        raise ValueError(f"expected one Ruby gem version in {ruby_version}")
-    ruby_version.write_text(updated)
+        raise ValueError(f"expected one Ruby gem version in {ruby_version_file}")
+    ruby_version_file.write_text(updated)
     node_manifest = output / "node" / "package.json"
     node = json.loads(node_manifest.read_text())
     node["version"] = release_version
@@ -80,7 +92,7 @@ def stage(version: str, pypi_name: str, output: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("version", help="stable release tag, for example v0.1.0")
+    parser.add_argument("version", help="stable release tag (v0.1.0) or canary (v0.1.0-canary.123)")
     parser.add_argument("output", type=Path, help="new staging directory")
     parser.add_argument("--pypi-name", required=True, help="approved PyPI distribution name")
     args = parser.parse_args()

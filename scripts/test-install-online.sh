@@ -74,6 +74,17 @@ bash "$repo_root/scripts/install-online.sh" \
   --yes >/dev/null || fail "online install failed"
 [[ -x "$prefix/bin/kvlite" && -x "$prefix/bin/kvlite-http" && -x "$prefix/bin/kvlite-redis" ]] || fail "installed binaries missing"
 
+echo "install-online test: release-stamped installer defaults to its own version" >&2
+[[ $(grep -c '^version="latest"$' "$repo_root/scripts/install-online.sh") -eq 1 ]] || fail "installer version marker missing"
+sed "s/^version=\"latest\"$/version=\"$test_version\"/" \
+  "$repo_root/scripts/install-online.sh" > "$work_root/release-installer.sh"
+bash "$work_root/release-installer.sh" \
+  --base-url "http://127.0.0.1:$port" \
+  --prefix "$work_root/stamped-prefix" \
+  --driver "$driver" \
+  --yes >/dev/null || fail "release-stamped installer default failed"
+[[ -x "$work_root/stamped-prefix/bin/kvlite" ]] || fail "release-stamped installer did not install CLI"
+
 export KVLITE_SYSTEM_MODULE_PATH="$prefix/lib/kvlite"
 export KVLITE_MODULE_PATH=""
 export KVLITE_HOME=""

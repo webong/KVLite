@@ -1,5 +1,5 @@
 {
-  "name": "kvlite",
+  "name": "usekvlite",
   "version": "0.1.0-dev.0",
   "description": "Embedded and HTTP Node.js client for KVLite",
   "license": "MIT",

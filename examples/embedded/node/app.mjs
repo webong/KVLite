@@ -1,4 +1,4 @@
-import { open } from 'kvlite';
+import { open } from 'usekvlite';
 import { fileURLToPath } from 'node:url';
 
 const path = process.env.KVLITE_DB_PATH ?? fileURLToPath(new URL('./data', import.meta.url));

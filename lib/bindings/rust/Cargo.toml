@@ -1,5 +1,5 @@
 [package]
-name = "kvlite"
+name = "usekvlite"
 version = "0.1.0-dev.0"
 edition = "2021"
 rust-version = "1.70"
@@ -10,6 +10,9 @@ homepage = "https://github.com/webong/KVlite"
 readme = "README.md"
 keywords = ["kvlite", "rocksdb", "key-value", "embedded"]
 categories = ["database"]
+
+[lib]
+name = "kvlite"
 
 [dependencies]
 libloading = "0.8"
