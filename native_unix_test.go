@@ -1,4 +1,4 @@
-//go:build cgo && (linux || darwin)
+//go:build cgo && (linux || (darwin && !amd64))
 
 package kvlite
 
