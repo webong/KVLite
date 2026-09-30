@@ -23,11 +23,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/webong/KVlite.git",
+    "url": "git+https://github.com/webong/KVLite.git",
     "directory": "lib/bindings/node"
   },
   "bugs": {
-    "url": "https://github.com/webong/KVlite/issues"
+    "url": "https://github.com/webong/KVLite/issues"
   },
-  "homepage": "https://github.com/webong/KVlite#readme"
+  "homepage": "https://github.com/webong/KVLite#readme"
 }

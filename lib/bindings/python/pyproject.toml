@@ -24,8 +24,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/webong/KVlite"
-Repository = "https://github.com/webong/KVlite"
+Homepage = "https://github.com/webong/KVLite"
+Repository = "https://github.com/webong/KVLite"
 
 [tool.setuptools.packages.find]
 where = ["src"]
