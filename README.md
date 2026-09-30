@@ -1,45 +1,35 @@
 # KVLite
 
 KVLite is an embedded key-value database for Go, PHP, Python, JavaScript,
-Ruby, and Rust. Your application opens a local database and chooses an engine
-such as LevelDB or RocksDB. HTTP and Redis are optional extensions, not
-required services.
+Ruby, and Rust. Pick an engine such as LevelDB or RocksDB; HTTP and Redis are
+optional extensions.
 
-> **Release status:** The language bindings are implemented but not yet
-> published to package registries. In particular, the existing `kvlite`
-> packages on npm and crates.io belong to unrelated projects. Do not install
-> them expecting this KVLite. Our selected npm and Rust package name is
-> `usekvlite`; we'll add copy-and-paste installation commands here after
-> the first release is verified.
+## Try the canary
 
-## What using KVLite looks like
+Preview assets are available for Linux x86-64 and macOS (Intel or Apple Silicon). Install
+the native host and LevelDB engine, then the Python binding:
 
-For example, in Python:
+```sh
+curl -fsSL https://github.com/webong/KVLite/releases/download/v0.1.0-canary.3658155118701/kvlite-installer.sh | bash -s -- --driver leveldb --prefix "$HOME/.local" --yes
+export KVLITE_SYSTEM_MODULE_PATH="$HOME/.local/lib/kvlite"
+python3 -m pip install 'https://github.com/webong/KVLite/releases/download/v0.1.0-canary.3658155118701/usekvlite-0.1.0.dev3658155118701-py3-none-any.whl'
+```
 
 ```python
 import kvlite
 
 with kvlite.open("./app-data", driver="leveldb") as db:
-    db.put("user:101", {"name": "Ada"}, ttl_seconds=3600)
-    print(db.get("user:101"))
+    db.put("user:101", {"name": "Ada"})
+    print(db.get("user:101"))  # {'name': 'Ada'}
 ```
 
-The same embedded workflow is implemented in every binding:
+The native engine bundle is required for embedded use; a language binding
+alone is not a database. Only one process can own a database directory at a
+time.
 
-| Language | Runnable example | Binding |
-| --- | --- | --- |
-| Go | [example](examples/embedded/go/main.go) | [Go binding](lib/bindings/go/README.md) |
-| PHP | [example](examples/embedded/php/app.php) | [PHP binding](lib/bindings/php/README.md) |
-| Python | [example](examples/embedded/python/app.py) | [Python binding](lib/bindings/python/README.md) |
-| JavaScript | [example](examples/embedded/node/app.mjs) | [Node binding](lib/bindings/node/README.md) |
-| Ruby | [example](examples/embedded/ruby/app.rb) | [Ruby binding](lib/bindings/ruby/README.md) |
-| Rust | [example](examples/embedded/rust/src/main.rs) | [Rust binding](lib/bindings/rust/README.md) |
-
-Each binding uses KVLite's native library. Embedded use also needs an
-installed engine bundle; the language package alone is not the database.
-One process owns a database directory at a time.
-
-See the [developer guide](DEVELOPERS.md) for building from source, extension
-and server setup, and development tests. The
-[publishing plan](packaging/PUBLISHING-RESEARCH.md) tracks what is needed
-before package-manager installation can become the primary quickstart.
+Using another language? See the [Go](lib/bindings/go/README.md),
+[PHP](lib/bindings/php/README.md), [JavaScript](lib/bindings/node/README.md),
+[Ruby](lib/bindings/ruby/README.md), or [Rust](lib/bindings/rust/README.md)
+binding guide. Registry publication is still in progress; use the
+[canary release](https://github.com/webong/KVLite/releases/tag/v0.1.0-canary.3658155118701)
+for preview artifacts. For builds and architecture, see [DEVELOPERS.md](DEVELOPERS.md).
