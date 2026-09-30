@@ -21,7 +21,7 @@ path; a custom prefix uses its `lib/kvlite` catalog in
 | Directory | Package name | Local API | Remote API | Binding test |
 | --- | --- | --- | --- | --- |
 | [repository root](../../) | `github.com/webong/kvlite` | cgo dynamic C ABI | CLI or optional transport | `GOWORK=off go test ./...` at the root |
-| [`php/`](php/) | `kvlite/kvlite` (`KVLite\KVLite`) | PHP FFI | JSON/HTTP | `composer --working-dir=lib/bindings/php test` |
+| [`php/`](php/) | `kvlite/kvlite` (`KVLite\KVLite`) | PHP FFI | JSON/HTTP | `composer test` at the repository root |
 | [`python/`](python/) | `usekvlite` (`import kvlite`) | `ctypes` | JSON/HTTP | `bash lib/bindings/python/tests/run.sh` |
 | [`node/`](node/) | `usekvlite` | N-API loader | JSON/HTTP | `npm --prefix lib/bindings/node test` |
 | [`ruby/`](ruby/) | `kvlite` (`require "kvlite"`) | Fiddle C ABI | JSON/HTTP | `ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |f| require File.expand_path(f) }'` inside `ruby/` |
@@ -70,11 +70,13 @@ Python, npm, Ruby, and Rust packages. Registry jobs run only afterward and
 only when separately enabled. Existing releases are never replaced; source
 files are not edited to stamp versions.
 
-Non-Go registry publication is separately opt-in. Those variables default to
-disabled; enable one only after its destination and protected GitHub
-environment are ready. On canaries, npm uses the `canary` dist-tag, Python a
-`.devN` version, Ruby a prerelease version, Rust a SemVer prerelease, and PHP
-the `dev-main` split branch. The Go binding follows the release tag directly:
+Python, npm, Ruby, and Rust registry publication is separately opt-in. Those
+variables default to disabled; enable one only after its destination and
+protected GitHub environment are ready. On canaries, npm uses the `canary`
+dist-tag, Python a `.devN` version, Ruby a prerelease version, and Rust a
+SemVer prerelease. Packagist indexes this repository after package registration;
+its `dev-main` branch is the PHP development version. The Go binding follows
+the release tag directly:
 
 | Destination | Repository variable | One-time setup |
 | --- | --- | --- |
@@ -83,7 +85,7 @@ the `dev-main` split branch. The Go binding follows the release tag directly:
 | npm `usekvlite` | `KVLITE_PUBLISH_NPM=true` | The unscoped `kvlite` name belongs to an unrelated project. `usekvlite` returned 404 on 2026-09-29 but is not reserved; establish ownership before enabling publication. |
 | RubyGems `kvlite` | `KVLITE_PUBLISH_RUBY=true` | Verify ownership of the gem name, configure a pending RubyGems trusted publisher for `webong/KVlite`, workflow `release-artifacts.yml`, environment `rubygems`, then protect that environment. RubyGems uses OIDC; no registry token is stored. |
 | crates.io `usekvlite` | `KVLITE_PUBLISH_CRATES=true` | The `kvlite` crate belongs to an unrelated project. `usekvlite` returned 404 on 2026-09-29 but is not reserved; bootstrap its first release manually, then configure crates.io trusted publishing for environment `crates-io`. |
-| Packagist `kvlite/kvlite` | `KVLITE_PUBLISH_PHP=true` | Verify name ownership, create a dedicated PHP repository, set `KVLITE_PHP_SPLIT_REPO=webong/<repo>` and a repository-scoped `KVLITE_PHP_SPLIT_TOKEN` secret. Register it on Packagist after the PHP subtree has supplied a root `composer.json`. The GitHub owner need not match the Composer vendor. |
+| Packagist `kvlite/kvlite` | repository-root `composer.json` | Verify name ownership, then submit `https://github.com/webong/KVLite` to Packagist. No split repository, publishing token, or separate CI job is required. The GitHub owner need not match the Composer vendor. |
 
 Registry setup references: [PyPI trusted publishers](https://docs.pypi.org/trusted-publishers/),
 [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/),
@@ -91,11 +93,11 @@ Registry setup references: [PyPI trusted publishers](https://docs.pypi.org/trust
 [crates.io trusted publishing](https://crates.io/docs/trusted-publishing), and
 [Packagist package registration](https://packagist.org/about).
 
-The Go binding has its module metadata at this repository root. Packagist
-requires a separate repository root for its metadata, so the PHP job
-mirrors the `lib/bindings/php` Git subtree to the dedicated repository's
-`main` branch and matching tag. The push is non-forced and fails rather than
-replacing a prior release. The other jobs use OIDC instead of registry tokens.
+The Go module and Composer manifest coexist at this repository root. Composer
+autoloads only `lib/bindings/php/src`, but installing the package currently
+downloads the entire source repository. Packagist reads new branches and tags
+from this repository; no PHP mirror job or registry token is needed. The other
+registry jobs use OIDC instead of registry tokens.
 Protect `v*` tags and require reviewers on the publishing environments
 before enabling the variables. Registry releases cannot be rolled back as one
 transaction: if one job fails after another succeeds, resolve it at that

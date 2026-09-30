@@ -11,6 +11,16 @@ SCRIPT = Path(__file__).with_name("stage-language-bindings.py")
 
 
 class StageLanguageBindingsTest(unittest.TestCase):
+    def test_root_php_manifest_matches_binding_package(self) -> None:
+        root = SCRIPT.parents[1]
+        root_manifest = json.loads((root / "composer.json").read_text())
+        binding_manifest = json.loads((root / "lib/bindings/php/composer.json").read_text())
+        prefix = "lib/bindings/php/"
+        binding_manifest["autoload"]["psr-4"]["KVLite\\"] = prefix + binding_manifest["autoload"]["psr-4"]["KVLite\\"]
+        binding_manifest["autoload-dev"]["psr-4"]["KVLite\\Tests\\"] = prefix + binding_manifest["autoload-dev"]["psr-4"]["KVLite\\Tests\\"]
+        binding_manifest["scripts"]["test"] = "bash " + prefix + binding_manifest["scripts"]["test"].removeprefix("bash ")
+        self.assertEqual(root_manifest, binding_manifest)
+
     def run_stage(self, version: str, output: Path, name: str = "usekvlite") -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPT), version, str(output), "--pypi-name", name],

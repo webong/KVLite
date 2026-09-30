@@ -13,18 +13,21 @@ optional Redis endpoint).
 
 ## Install
 
-Until the package is published on Packagist, use it from a clone as a Composer
-path repository:
+Until the package is registered on Packagist, use the repository root from a
+clone as a Composer path repository:
 
 ```json
 {
-  "repositories": [{"type": "path", "url": "../KVlite/lib/bindings/php", "options": {"symlink": true}}],
+  "repositories": [{"type": "path", "url": "../KVLite", "options": {"symlink": true}}],
   "require": {"kvlite/kvlite": "dev-main"}
 }
 ```
 
-The package source is in `lib/bindings/php`; publishing will make the
-`kvlite/kvlite` Composer package, subject to Packagist name ownership.
+The PHP source remains in `lib/bindings/php`; the repository-root
+`composer.json` maps its autoloader there. Packagist can index this repository
+directly once the `kvlite/kvlite` name is registered by its owner. The
+Composer distribution currently includes the rest of the monorepo too; the
+autoloaded package code is only the PHP binding.
 
 ## Embedded use
 

@@ -1,0 +1,27 @@
+{
+  "name": "kvlite/kvlite",
+  "description": "Embedded and HTTP PHP client for KVLite",
+  "type": "library",
+  "license": "MIT",
+  "keywords": ["kvlite", "rocksdb", "key-value", "embedded", "ffi"],
+  "require": {
+    "php": "^8.1",
+    "ext-json": "*"
+  },
+  "suggest": {
+    "ext-ffi": "Required for KVLite::open() embedded mode; KVLite::connect() only needs PHP's HTTP stream wrapper."
+  },
+  "autoload": {
+    "psr-4": {
+      "KVLite\\": "lib/bindings/php/src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "KVLite\\Tests\\": "lib/bindings/php/tests/"
+    }
+  },
+  "scripts": {
+    "test": "bash lib/bindings/php/tests/run.sh"
+  }
+}

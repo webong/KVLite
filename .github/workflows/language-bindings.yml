@@ -36,6 +36,8 @@ jobs:
           extensions: ffi
           tools: composer:v2
       - run: composer --working-dir=lib/bindings/php validate --no-check-publish
+      - run: composer validate --strict
+      - run: composer dump-autoload --no-dev && php -r 'require "vendor/autoload.php"; if (!class_exists("KVLite\\KVLite")) { exit(1); }'
       - run: composer --working-dir=lib/bindings/php test
 
   python:

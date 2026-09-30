@@ -394,6 +394,9 @@ jobs:
         shell: bash
         run: |
           GOWORK=off go test -race ./...
+          composer validate --strict
+          composer dump-autoload --no-dev
+          php -r 'require "vendor/autoload.php"; if (!class_exists("KVLite\\KVLite")) { exit(1); }'
           composer --working-dir=lib/bindings/php test
           bash lib/bindings/python/tests/run.sh
           npm --prefix lib/bindings/node test
@@ -542,40 +545,3 @@ jobs:
       - run: cargo publish --manifest-path rust/Cargo.toml
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-
-  publish-php:
-    name: Mirror PHP package for Packagist
-    needs: [prepare, binding-packages, github-release]
-    if: vars.KVLITE_PUBLISH_PHP == 'true'
-    runs-on: ubuntu-24.04
-    environment: packagist
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Push PHP subtree without rewriting existing tags
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.KVLITE_PHP_SPLIT_TOKEN }}
-          PHP_SPLIT_REPO: ${{ vars.KVLITE_PHP_SPLIT_REPO }}
-          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          if [[ ! "$PHP_SPLIT_REPO" =~ ^webong/[A-Za-z0-9._-]+$ ]]; then
-            echo "Set KVLITE_PHP_SPLIT_REPO to the dedicated webong PHP repository" >&2
-            exit 1
-          fi
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "Set KVLITE_PHP_SPLIT_TOKEN with write access to that repository" >&2
-            exit 1
-          fi
-          gh auth setup-git
-          split_sha="$(git subtree split --prefix=lib/bindings/php HEAD)"
-          git remote add php "https://github.com/$PHP_SPLIT_REPO.git"
-          if [[ "$RELEASE_CHANNEL" == 'canary' ]]; then
-            git push php "$split_sha:refs/heads/main"
-          else
-            git push --atomic php "$split_sha:refs/heads/main" "$split_sha:refs/tags/$RELEASE_VERSION"
-          fi
