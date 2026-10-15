@@ -70,4 +70,7 @@ cargo test
 ```
 
 The test compiles a small ABI-compatible C mock and exercises real dynamic
-loading; RocksDB itself is not required for the binding test.
+loading; RocksDB itself is not required for the binding test. It uses `CC`
+when set and otherwise `cc`, except on MSVC Windows where it invokes `cl`;
+run those tests from a Developer Command Prompt (or a `vcvarsall`-style
+environment) so `cl` can find the Windows SDK headers.

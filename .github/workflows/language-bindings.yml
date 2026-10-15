@@ -77,11 +77,20 @@ jobs:
         run: ruby -Ilib -e 'Dir["test/test_*.rb"].sort.each { |file| require File.expand_path(file) }'
 
   rust:
-    name: Rust dynamic binding
-    runs-on: ubuntu-24.04
+    name: Rust dynamic binding (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # The native test compiles its ABI mock with MSVC's `cl`, which needs
+      # the Developer Command Prompt environment on `PATH`.
+      - name: Set up the MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
       - run: cargo test --manifest-path lib/bindings/rust/Cargo.toml
 
   package-preview:

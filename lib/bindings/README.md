@@ -50,7 +50,9 @@ The wrappers serialize normal values as JSON and each native wrapper also has a
 raw byte API for applications that choose MessagePack, protobuf, or another
 codec. Packages are source-ready for a dedicated Go module, Composer, PyPI,
 npm, RubyGems, and crates.io, but are not yet published. Release CI builds a
-self-contained RocksDB runtime bundle on Linux and macOS; real release assets
+self-contained RocksDB runtime bundle on Linux and macOS — the Windows job
+ships the four non-RocksDB engines, because the pinned `grocksdb` links `-ldl`
+and MinGW-w64 has no `libdl`; real release assets
 and registry publication still need validation. LevelDB is pure
 Go inside KVLite, but its embedded selection still requires a current
 driver bundle exporting `kvlite_open_with_driver` (or the ABI-compatible
@@ -63,8 +65,9 @@ release trees, and checks the Go module, Composer, wheel/sdist, npm tarball, Rub
 packages. `release-artifacts.yml` accepts stable `vX.Y.Z` tags and creates a
 canary on every `main` push (or a manual `publish_canary` dispatch from `main`).
 The canary uses an immutable `v0.1.0-canary.N` version and is a GitHub prerelease.
-Both channels require the native Linux/macOS artifact matrix to pass,
-retest the bindings, stage packages in a temporary copy, and verify all three
+Both channels require the native artifact matrix (Linux, macOS, and Windows
+via MinGW-w64) to pass,
+retest the bindings, stage packages in a temporary copy, and verify all five
 native tarballs. The GitHub Release carries native bundles and the built
 Python, npm, Ruby, and Rust packages. Registry jobs run only afterward and
 only when separately enabled. Existing releases are never replaced; source

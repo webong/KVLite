@@ -1,13 +1,22 @@
-//go:build cgo && (linux || darwin)
+//go:build cgo && (linux || darwin || windows)
 
+// The embedded Go binding loads an engine-owned C ABI library at runtime
+// through the platform loader: dlopen on Linux and macOS, LoadLibrary on
+// Windows. Both paths share the handle layout below, so the Go side below is
+// platform-independent.
 package kvlite
 
 /*
 #cgo linux LDFLAGS: -ldl
-#include <dlfcn.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 // These signatures are the embedded subset of capi/kvlite.h, ABI version 1.
 typedef unsigned int (*abi_fn)(void);
@@ -30,38 +39,106 @@ typedef struct {
     free_fn free_value;
 } kvlite_module;
 
+#ifdef _WIN32
+
+// LoadLibrary reports failures through GetLastError, and its search rules
+// already prefer the loading executable's own directory, which is where a
+// release bundle keeps an engine-owned DLL.
+static char *message_text(const char *prefix, DWORD code) {
+    LPSTR detail = NULL;
+    DWORD length = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                                      FORMAT_MESSAGE_FROM_SYSTEM |
+                                      FORMAT_MESSAGE_IGNORE_INSERTS,
+                                  NULL, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                  (LPSTR)&detail, 0, NULL);
+    if (length > 0 && detail != NULL) {
+        while (length > 0 && (detail[length - 1] == '\r' || detail[length - 1] == '\n')) {
+            detail[--length] = '\0';
+        }
+    }
+    const char *text = (length > 0 && detail != NULL) ? detail : "no system message";
+    size_t prefix_len = strlen(prefix);
+    size_t text_len = strlen(text);
+    char *message = malloc(prefix_len + text_len + 3);
+    if (message != NULL) {
+        memcpy(message, prefix, prefix_len);
+        memcpy(message + prefix_len, ": ", 2);
+        memcpy(message + prefix_len + 2, text, text_len + 1);
+    }
+    if (detail != NULL) LocalFree(detail);
+    return message;
+}
+
+static void *open_library(const char *path, char **error) {
+    HMODULE handle = LoadLibraryA(path);
+    if (handle == NULL) {
+        *error = message_text("LoadLibrary failed", GetLastError());
+    }
+    return (void *)handle;
+}
+
+static void *lookup_symbol(void *library, const char *name) {
+    return (void *)GetProcAddress((HMODULE)library, name);
+}
+
+static void unload_library(void *library) {
+    FreeLibrary((HMODULE)library);
+}
+
+#else
+
+static void *open_library(const char *path, char **error) {
+    void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (handle == NULL) {
+        const char *why = dlerror();
+        *error = strdup(why == NULL ? "dlopen failed" : why);
+    }
+    return handle;
+}
+
+static void *lookup_symbol(void *library, const char *name) {
+    return dlsym(library, name);
+}
+
+static void unload_library(void *library) {
+    dlclose(library);
+}
+
+#endif
+
 static kvlite_module *bridge_load(const char *path, char **error) {
     kvlite_module *m = calloc(1, sizeof(*m));
     if (m == NULL) {
-        *error = strdup("out of memory while loading libkvlite");
+        *error = strdup("out of memory while loading the KVLite library");
         return NULL;
     }
-    m->library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    m->library = open_library(path, error);
     if (m->library == NULL) {
-        const char *why = dlerror();
-        *error = strdup(why == NULL ? "dlopen failed" : why);
+        if (*error == NULL) {
+            *error = strdup("unable to load the KVLite library");
+        }
         free(m);
         return NULL;
     }
-    abi_fn abi = (abi_fn)dlsym(m->library, "kvlite_abi_version");
-    m->open = (open_fn)dlsym(m->library, "kvlite_open");
-    m->open_driver = (open_driver_fn)dlsym(m->library, "kvlite_open_with_driver");
+    abi_fn abi = (abi_fn)lookup_symbol(m->library, "kvlite_abi_version");
+    m->open = (open_fn)lookup_symbol(m->library, "kvlite_open");
+    m->open_driver = (open_driver_fn)lookup_symbol(m->library, "kvlite_open_with_driver");
     if (m->open_driver == NULL) {
-        m->open_driver = (open_driver_fn)dlsym(m->library, "kvlite_open_with_backend");
+        m->open_driver = (open_driver_fn)lookup_symbol(m->library, "kvlite_open_with_backend");
     }
-    m->close = (close_fn)dlsym(m->library, "kvlite_close");
-    m->put = (put_fn)dlsym(m->library, "kvlite_put");
-    m->get = (get_fn)dlsym(m->library, "kvlite_get");
-    m->delete_key = (delete_fn)dlsym(m->library, "kvlite_delete");
-    m->free_value = (free_fn)dlsym(m->library, "kvlite_free");
+    m->close = (close_fn)lookup_symbol(m->library, "kvlite_close");
+    m->put = (put_fn)lookup_symbol(m->library, "kvlite_put");
+    m->get = (get_fn)lookup_symbol(m->library, "kvlite_get");
+    m->delete_key = (delete_fn)lookup_symbol(m->library, "kvlite_delete");
+    m->free_value = (free_fn)lookup_symbol(m->library, "kvlite_free");
     if (abi == NULL || m->open == NULL || m->close == NULL || m->put == NULL ||
         m->get == NULL || m->delete_key == NULL || m->free_value == NULL) {
-        *error = strdup("libkvlite is missing a required ABI v1 symbol");
+        *error = strdup("the KVLite library is missing a required ABI v1 symbol");
     } else if (abi() != 1) {
-        *error = strdup("libkvlite ABI mismatch: Go binding requires ABI 1");
+        *error = strdup("KVLite library ABI mismatch: Go binding requires ABI 1");
     }
     if (*error != NULL) {
-        dlclose(m->library);
+        unload_library(m->library);
         free(m);
         return NULL;
     }
@@ -74,7 +151,7 @@ static int bridge_open(kvlite_module *m, const char *path, const char *driver,
                        int explicit_driver, unsigned long long *handle, char **error) {
     if (explicit_driver) {
         if (m->open_driver == NULL) {
-            *error = strdup("libkvlite does not support explicit driver selection");
+            *error = strdup("the KVLite library does not support explicit driver selection");
             return 2;
         }
         return m->open_driver(path, driver, handle, error);

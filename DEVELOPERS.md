@@ -122,9 +122,10 @@ around.)
 
 `extensions/leveldb`, `extensions/badgerdb`, and `extensions/boltdb` are pure
 Go; the BoltDB-compatible driver uses the maintained bbolt fork. `extensions/lmdb`
-requires CGo but bundles its LMDB source through the pinned binding. It uses a
-fixed 16 GiB virtual map and reports map-full explicitly; plan capacity before
-using it for larger stores. `extensions/rocksdb` needs the `rocksdb`
+requires CGo but bundles its LMDB source through the pinned binding. It reserves
+a 16 GiB virtual map by default and reports map-full explicitly; set a larger
+map before opening a bigger store with
+`kvlite.WithDriverOption("lmdb.map_size", int64(bytes))`. `extensions/rocksdb` needs the `rocksdb`
 build tag and the native library. `extensions/berkeleydb` is CGo-only and
 requires a separately chosen Berkeley DB distribution; the owner of a
 Berkeley DB-enabled binary must comply with that distribution's terms. It
@@ -550,7 +551,10 @@ CLI through `KVLITE_SYSTEM_MODULE_PATH`, or automatically from standard
 `KVLITE_LIBRARY_PATH` remains available for custom layouts. On Intel macOS,
 non-Go bindings prefer the engine-owned library because a Go host cannot load a
 second Go runtime there; the Go binding itself cannot embed a Go-built KVLite
-library on Intel macOS. Embedded wrappers use RocksDB by default unless given an optional driver name (for
+library on Intel macOS. On Windows the Go binding loads `kvlite.dll` through
+`LoadLibrary`, so an embedded build needs cgo with a gcc-compatible compiler
+(MinGW-w64 — Go's cgo cannot drive MSVC); a release bundle keeps that DLL in
+`host\lib` beside the executables, which is the first place Windows looks. Embedded wrappers use RocksDB by default unless given an optional driver name (for
 example, `leveldb`); remote `connect()` clients may send a driver selection
 that the server validates against its
 server-owned mappings. The wrapper packages intentionally do not make a second
@@ -608,10 +612,10 @@ library, the reviewed `kvlite.h` ABI header, and `SHA256SUMS` under
 executables with their own checksummed manifests under
 `dist/v0.1.0/<os>-<arch>/modules/{http,redis}/`. Because RocksDB is a cgo/C++
 dependency, the script intentionally refuses cross-compilation; the
-included GitHub Actions workflow builds Linux and macOS artifacts on native
-runners. `windows-amd64` is already part of the release contract and can be
-built by the same script on a Windows runner once its RocksDB toolchain is
-pinned in CI.
+included GitHub Actions workflow builds every target on a native runner:
+Linux, macOS, and `windows-amd64`. The Windows job runs in MSYS2/MINGW64
+(cgo cannot use MSVC) and ships the four non-RocksDB engines, because the
+pinned `grocksdb` links `-ldl`, which MinGW-w64 does not provide.
 
 `drivers/<driver>` is retained as the initial release-layout path for language
 binding compatibility. It does not reflect the source layout: all optional Go

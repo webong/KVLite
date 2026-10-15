@@ -1,4 +1,9 @@
-//go:build cgo && (linux || (darwin && !amd64))
+// The mock engine is plain C, so these tests exercise the platform loader
+// (dlopen or LoadLibrary) without needing a built KVLite release. Intel macOS
+// stays excluded: two Go runtimes cannot share that process, and the binding
+// refuses c-shared libraries there.
+
+//go:build cgo && (linux || (darwin && !amd64) || windows)
 
 package kvlite
 
@@ -14,17 +19,25 @@ import (
 
 func buildMock(t *testing.T, extraFlags ...string) string {
 	t.Helper()
-	name := libraryName()
-	output := filepath.Join(t.TempDir(), name)
-	flags := []string{"-fPIC"}
-	if runtime.GOOS == "darwin" {
-		flags = append(flags, "-dynamiclib")
-	} else {
-		flags = append(flags, "-shared")
+	output := filepath.Join(t.TempDir(), libraryName())
+	flags := []string{}
+	switch runtime.GOOS {
+	case "darwin":
+		flags = append(flags, "-fPIC", "-dynamiclib")
+	case "windows":
+		// Go's own cgo on Windows only works with a gcc-compatible compiler,
+		// so the mock uses the same MinGW-w64 gcc that builds the binding.
+		// PE has no -fPIC.
+	default:
+		flags = append(flags, "-fPIC", "-shared")
 	}
 	flags = append(flags, extraFlags...)
 	flags = append(flags, "testdata/mock_kvlite.c", "-o", output)
-	command := exec.Command("cc", flags...)
+	compiler := "cc"
+	if runtime.GOOS == "windows" {
+		compiler = "gcc"
+	}
+	command := exec.Command(compiler, flags...)
 	if result, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build mock: %v: %s", err, result)
 	}

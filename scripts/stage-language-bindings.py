@@ -15,8 +15,8 @@ CANARY_VERSION_PATTERN = re.compile(rf"^v?{BASE_VERSION}-canary\.([1-9][0-9]*)$"
 PYPI_NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 PACKAGE_FILES = {
     "go": (
-        "go.mod", "db.go", "db_test.go", "native_unix.go",
-        "native_unix_test.go", "native_unsupported.go", "testdata",
+        "go.mod", "db.go", "db_test.go", "native_dynamic.go",
+        "native_test.go", "native_unsupported.go", "testdata",
     ),
     "php": ("composer.json", "README.md", "src"),
     "python": ("pyproject.toml", "README.md", "src"),
