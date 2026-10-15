@@ -40,7 +40,8 @@ case "$os" in
     ;;
   windows)
     # MSVC names the DLL and its import library after -Fe, with no "lib"
-    # prefix: an import table records that bare DLL name.
+    # prefix: an import table records that bare DLL name. The import library
+    # only exists because dep.c exports its symbol.
     suffix="dll"
     exe=".exe"
     lib_prefix=""
@@ -63,7 +64,13 @@ cleanup() {
 trap cleanup EXIT
 
 cat > "$work_root/dep.c" <<'EOF'
-int kvlite_test_dep_answer(void) {
+#if defined(_WIN32)
+#define KVLITE_TEST_EXPORT __declspec(dllexport)
+#else
+#define KVLITE_TEST_EXPORT
+#endif
+
+KVLITE_TEST_EXPORT int kvlite_test_dep_answer(void) {
   return 42;
 }
 EOF
@@ -134,7 +141,8 @@ cp "$program" "$staging/bin/prog$exe"
 list_dependencies "$staging/bin/prog$exe" | grep -qi "$declared_dependency" || \
   fail "synthetic binary does not link the synthetic dependency"
 
-bash "$repo_root/scripts/bundle-native-deps.sh" "$staging" "$target" >/dev/null || fail "bundling failed"
+KVLITE_BUNDLE_LIB_PATH="$work_root" \
+  bash "$repo_root/scripts/bundle-native-deps.sh" "$staging" "$target" >/dev/null || fail "bundling failed"
 
 bundle_dir="$staging/lib"
 [[ "$os" == windows ]] && bundle_dir="$staging/bin"

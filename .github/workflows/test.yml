@@ -121,9 +121,12 @@ jobs:
 
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          # UCRT64 rather than the deprecated MINGW64 environment, and an
+          # inherited PATH so the Go toolchain installed above is visible.
+          msystem: UCRT64
+          path-type: inherit
           update: false
-          install: mingw-w64-x86_64-gcc
+          install: mingw-w64-ucrt-x86_64-gcc
 
       - name: Loader tests through the mock C engine
         shell: msys2 {0}
