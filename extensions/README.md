@@ -13,7 +13,7 @@ instead of importing these implementation packages.
 | [`leveldb/`](leveldb/) | Engine | `github.com/webong/kvlite/extensions/leveldb` | Pure-Go LevelDB implementation. |
 | [`badgerdb/`](badgerdb/) | Engine | `github.com/webong/kvlite/extensions/badgerdb` | Pure-Go Badger v4 implementation. |
 | [`boltdb/`](boltdb/) | Engine | `github.com/webong/kvlite/extensions/boltdb` | Pure-Go BoltDB-compatible implementation backed by bbolt. |
-| [`lmdb/`](lmdb/) | Engine | `github.com/webong/kvlite/extensions/lmdb` | CGo binding with bundled LMDB 0.9 source; 16 GiB virtual map. |
+| [`lmdb/`](lmdb/) | Engine | `github.com/webong/kvlite/extensions/lmdb` | CGo binding with bundled LMDB 0.9 source; configurable virtual map. |
 | [`berkeleydb/`](berkeleydb/) | Engine | `github.com/webong/kvlite/extensions/berkeleydb` | CGo-only; the application owner supplies a licensed Berkeley DB C library. |
 | [`http/`](http/) | Transport | `github.com/webong/kvlite/extensions/http` | Explicit JSON/HTTP owner and client extension. |
 | [`redis/`](redis/) | Transport | `github.com/webong/kvlite/extensions/redis` | Explicit Redis RESP2 server extension. |
@@ -57,10 +57,11 @@ application owner is entitled to use.
 BadgerDB and BoltDB require no external C library. The `boltdb` selection uses
 the maintained `go.etcd.io/bbolt` fork and stores its database in
 `KVLITE-BOLT.db`. LMDB needs `CGO_ENABLED=1` but does not need a system LMDB
-library: the pinned PowerDNS binding bundles the LMDB C source. Its fixed
-16 GiB map is virtual address space rather than immediate disk allocation on
+library: the pinned PowerDNS binding bundles the LMDB C source. Its 16 GiB
+default map is virtual address space rather than immediate disk allocation on
 sparse filesystems; reaching the limit returns an explicit error instead of
-resizing behind other readers. LMDB bundle metadata names both the binding's
+resizing behind other readers. Set the size at open time with
+`kvlite.WithDriverOption("lmdb.map_size", int64(bytes))`. LMDB bundle metadata names both the binding's
 BSD-3-Clause license and the bundled C source's OpenLDAP license. LMDB also
 limits raw storage-key length (usually 511 bytes); KVLite reports the limit
 when an encoded key exceeds it.

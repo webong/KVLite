@@ -12,6 +12,9 @@ control.
 | [`bindings/`](bindings/) | Go, PHP, Python, Node.js, Ruby, and Rust language packages | Installed C ABI or optional transports |
 | [`../extensions/rocksdb/`](../extensions/rocksdb/) | Optional RocksDB storage-driver extension | `extensions/rocksdb` |
 | [`../extensions/leveldb/`](../extensions/leveldb/) | Optional pure-Go LevelDB storage-driver extension | `extensions/leveldb` |
+| [`../extensions/badgerdb/`](../extensions/badgerdb/) | Optional pure-Go BadgerDB storage-driver extension | `extensions/badgerdb` |
+| [`../extensions/boltdb/`](../extensions/boltdb/) | Optional pure-Go BoltDB (bbolt) storage-driver extension | `extensions/boltdb` |
+| [`../extensions/lmdb/`](../extensions/lmdb/) | Optional LMDB CGo storage-driver extension | `extensions/lmdb` |
 | [`../extensions/berkeleydb/`](../extensions/berkeleydb/) | Optional Berkeley DB CGo storage-driver extension | Not bundled; application owner supplies a licensed library |
 | [`../extensions/http/`](../extensions/http/) | Optional Go HTTP server/client module | `extensions/http` |
 | [`../extensions/redis/`](../extensions/redis/) | Optional Redis-compatible server module | `extensions/redis` |

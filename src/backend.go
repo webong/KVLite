@@ -54,6 +54,10 @@ type DriverOptions struct {
 	// RecordExpired reports whether a raw KVLite record is expired now. Drivers
 	// with physical compaction can use it without knowing the envelope format.
 	RecordExpired func([]byte) bool
+	// Values carries engine-specific settings selected with WithDriverOption.
+	// KVLite core does not interpret them; a driver reads only the keys it
+	// defines and ignores the rest. The map is nil when none were supplied.
+	Values map[string]any
 }
 
 // DriverInfo describes an installed driver. Implementation and Format are
@@ -258,7 +262,7 @@ func registeredDriverFor(name DriverName) (DriverName, registeredDriver, error) 
 }
 
 func (cfg config) driverOptions() DriverOptions {
-	return DriverOptions{
+	options := DriverOptions{
 		BlockCacheSize:    cfg.blockCacheSize,
 		WriteBufferSize:   cfg.writeBufferSize,
 		MaxWriteBuffers:   cfg.maxWriteBuffers,
@@ -267,6 +271,13 @@ func (cfg config) driverOptions() DriverOptions {
 			return envelopeExpired(record, cfg.now())
 		},
 	}
+	if len(cfg.driverValues) > 0 {
+		options.Values = make(map[string]any, len(cfg.driverValues))
+		for key, value := range cfg.driverValues {
+			options.Values[key] = value
+		}
+	}
+	return options
 }
 
 func resolveLinkedDriverOrReportModule(name DriverName) (DriverName, registeredDriver, error) {

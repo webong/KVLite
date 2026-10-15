@@ -2,6 +2,7 @@ package kvlite
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type config struct {
 	writeBufferSize   int
 	maxWriteBuffers   int
 	maxBackgroundJobs int
+	driverValues      map[string]any
 	now               func() time.Time
 }
 
@@ -99,6 +101,30 @@ func WithMemoryBudget(bytes int) Option {
 		cfg.blockCacheSize = bytes / 2
 		cfg.writeBufferSize = bytes / 8
 		cfg.maxWriteBuffers = 2
+		return nil
+	}
+}
+
+// WithDriverOption supplies an engine-specific setting to the selected driver.
+// KVLite core does not interpret the key or value, and a driver ignores keys it
+// does not define. Keys are namespaced by driver; see the driver's package
+// documentation for the keys it reads. For example, LMDB accepts
+// "lmdb.map_size" as an int64 byte count for its virtual address-space map:
+//
+//	kvlite.Open("./data", kvlite.WithDriver("lmdb"),
+//		kvlite.WithDriverOption("lmdb.map_size", int64(64<<30)))
+func WithDriverOption(key string, value any) Option {
+	return func(cfg *config) error {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("%w: driver option key is required", ErrInvalidArgument)
+		}
+		if value == nil {
+			return fmt.Errorf("%w: driver option %q requires a value", ErrInvalidArgument, key)
+		}
+		if cfg.driverValues == nil {
+			cfg.driverValues = make(map[string]any)
+		}
+		cfg.driverValues[key] = value
 		return nil
 	}
 }

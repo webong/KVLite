@@ -105,6 +105,42 @@ func TestModuleManifestMatchesLinkedMetadata(t *testing.T) {
 	}
 }
 
+func TestMapSizeOptionIsHonored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes a multi-megabyte value")
+	}
+	db, err := kvlite.Open(t.TempDir(),
+		kvlite.WithDriver("lmdb"),
+		kvlite.WithDriverOption("lmdb.map_size", int64(1<<20)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// A value larger than the configured 1 MiB map cannot fit. The error must
+	// name that size, proving the option reached the driver.
+	err = db.Put(context.Background(), "big", strings.Repeat("x", 2<<20))
+	if err == nil || !strings.Contains(err.Error(), "1 MiB") {
+		t.Fatalf("Put() error = %v, want a 1 MiB map-full report", err)
+	}
+}
+
+func TestMapSizeOptionRejectsInvalidValues(t *testing.T) {
+	for name, value := range map[string]any{
+		"non-integer": "large",
+		"too small":   int64(1),
+	} {
+		_, err := kvlite.Open(t.TempDir(),
+			kvlite.WithDriver("lmdb"),
+			kvlite.WithDriverOption("lmdb.map_size", value),
+		)
+		if err == nil || !strings.Contains(err.Error(), "lmdb.map_size") {
+			t.Fatalf("%s: Open() error = %v, want lmdb.map_size guidance", name, err)
+		}
+	}
+}
+
 func TestOversizedStorageKeyHasActionableError(t *testing.T) {
 	db, err := kvlite.Open(t.TempDir(), kvlite.WithDriver("lmdb"))
 	if err != nil {

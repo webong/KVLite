@@ -31,6 +31,33 @@
       "description": "Pure-Go LevelDB driver bundle."
     },
     {
+      "id": "badgerdb",
+      "goModule": "github.com/webong/kvlite/extensions/badgerdb",
+      "sourceManifest": "../extensions/badgerdb/kvlite-module.json",
+      "manifest": "kvlite-module.json",
+      "buildTags": [],
+      "native": false,
+      "description": "Pure-Go BadgerDB driver bundle."
+    },
+    {
+      "id": "boltdb",
+      "goModule": "github.com/webong/kvlite/extensions/boltdb",
+      "sourceManifest": "../extensions/boltdb/kvlite-module.json",
+      "manifest": "kvlite-module.json",
+      "buildTags": [],
+      "native": false,
+      "description": "Pure-Go BoltDB (bbolt) driver bundle."
+    },
+    {
+      "id": "lmdb",
+      "goModule": "github.com/webong/kvlite/extensions/lmdb",
+      "sourceManifest": "../extensions/lmdb/kvlite-module.json",
+      "manifest": "kvlite-module.json",
+      "buildTags": [],
+      "native": true,
+      "description": "LMDB CGo driver bundle built against the bundled 0.9 C source; ships binding and OpenLDAP notices."
+    },
+    {
       "id": "berkeleydb",
       "goModule": "github.com/webong/kvlite/extensions/berkeleydb",
       "sourceManifest": "../extensions/berkeleydb/kvlite-module.json",
@@ -117,23 +144,28 @@
   "targets": {
     "linux-amd64": {
       "library": "libkvlite.so",
-      "cli": "kvlite"
+      "cli": "kvlite",
+      "releaseWorkflow": true
     },
     "linux-arm64": {
       "library": "libkvlite.so",
-      "cli": "kvlite"
+      "cli": "kvlite",
+      "releaseWorkflow": true
     },
     "darwin-amd64": {
       "library": "libkvlite.dylib",
-      "cli": "kvlite"
+      "cli": "kvlite",
+      "releaseWorkflow": true
     },
     "darwin-arm64": {
       "library": "libkvlite.dylib",
-      "cli": "kvlite"
+      "cli": "kvlite",
+      "releaseWorkflow": true
     },
     "windows-amd64": {
       "library": "kvlite.dll",
-      "cli": "kvlite.exe"
+      "cli": "kvlite.exe",
+      "releaseWorkflow": true
     }
   }
 }

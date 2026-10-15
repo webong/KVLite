@@ -8,5 +8,7 @@ import (
 	"kvlite"
 )
 
-func nativeAvailable() error                   { return fmt.Errorf("kvlite: LMDB driver requires CGO_ENABLED=1") }
-func openNative(string) (kvlite.Engine, error) { return nil, nativeAvailable() }
+func nativeAvailable() error { return fmt.Errorf("kvlite: LMDB driver requires CGO_ENABLED=1") }
+func openNative(string, kvlite.DriverOptions) (kvlite.Engine, error) {
+	return nil, nativeAvailable()
+}

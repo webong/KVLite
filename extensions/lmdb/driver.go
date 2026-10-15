@@ -28,9 +28,11 @@ func (driver) Info() kvlite.DriverInfo {
 
 func (driver) Available() error { return nativeAvailable() }
 
-func (driver) Open(path string, _ kvlite.DriverOptions) (kvlite.Engine, error) {
+// Open applies the "lmdb.map_size" driver option when present; every other
+// setting is ignored. See WithDriverOption in the core package.
+func (driver) Open(path string, options kvlite.DriverOptions) (kvlite.Engine, error) {
 	if err := nativeAvailable(); err != nil {
 		return nil, err
 	}
-	return openNative(path)
+	return openNative(path, options)
 }

@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	testMemoryDriverName DriverName = "test-memory"
-	testOtherDriverName  DriverName = "test-other"
+	testMemoryDriverName  DriverName = "test-memory"
+	testOtherDriverName   DriverName = "test-other"
+	testOptionsDriverName DriverName = "test-options"
 )
 
 var testDriverEngines = struct {
@@ -19,14 +20,41 @@ var testDriverEngines = struct {
 	items map[string]*memoryEngine
 }{items: make(map[string]*memoryEngine)}
 
+// testOptionsSink records the DriverOptions the options driver last received.
+var testOptionsSink = struct {
+	sync.Mutex
+	options DriverOptions
+}{}
+
 type testRegisteredDriver struct {
 	name           DriverName
 	implementation string
 }
 
+type testOptionsDriver struct{}
+
 func init() {
 	MustRegisterDriver(testRegisteredDriver{name: testMemoryDriverName, implementation: "kvlite-test-memory"})
 	MustRegisterDriver(testRegisteredDriver{name: testOtherDriverName, implementation: "kvlite-test-other"})
+	MustRegisterDriver(testOptionsDriver{})
+}
+
+func (testOptionsDriver) Info() DriverInfo {
+	return DriverInfo{
+		Driver:         testOptionsDriverName,
+		Implementation: "kvlite-test-options",
+		Format:         "v1",
+		Version:        "test",
+	}
+}
+
+func (testOptionsDriver) Available() error { return nil }
+
+func (testOptionsDriver) Open(_ string, options DriverOptions) (Engine, error) {
+	testOptionsSink.Lock()
+	testOptionsSink.options = options
+	testOptionsSink.Unlock()
+	return newMemoryEngine(), nil
 }
 
 func (driver testRegisteredDriver) Info() DriverInfo {
@@ -164,6 +192,47 @@ func TestOpenReportsInstalledDriverModuleWithoutLinkedAdapter(t *testing.T) {
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("Open() created unavailable backend path: stat error = %v", statErr)
+	}
+}
+
+func TestWithDriverOptionReachesDriver(t *testing.T) {
+	db, err := Open(t.TempDir(),
+		WithDriver(string(testOptionsDriverName)),
+		WithDriverOption("engine.example", int64(42)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	testOptionsSink.Lock()
+	values := testOptionsSink.options.Values
+	testOptionsSink.Unlock()
+	if got := values["engine.example"]; got != int64(42) {
+		t.Fatalf("driver option = %#v, want int64(42)", got)
+	}
+}
+
+func TestWithDriverOptionRejectsInvalidArguments(t *testing.T) {
+	testOptionsSink.Lock()
+	testOptionsSink.options = DriverOptions{}
+	testOptionsSink.Unlock()
+
+	for name, option := range map[string]Option{
+		"empty key": WithDriverOption("", 1),
+		"blank key": WithDriverOption("   ", 1),
+		"nil value": WithDriverOption("engine.example", nil),
+	} {
+		_, err := Open(t.TempDir(), WithDriver(string(testOptionsDriverName)), option)
+		if !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("%s: Open() error = %v, want ErrInvalidArgument", name, err)
+		}
+	}
+	testOptionsSink.Lock()
+	leaked := testOptionsSink.options.Values
+	testOptionsSink.Unlock()
+	if leaked != nil {
+		t.Fatalf("invalid options reached the driver: %#v", leaked)
 	}
 }
 
