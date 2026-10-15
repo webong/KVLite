@@ -116,7 +116,7 @@ arch_name="$(uname -m)"
 case "$os_name" in
   Darwin) os="darwin" ;;
   Linux) os="linux" ;;
-  *) fail "unsupported OS: $os_name. Windows users: download the windows-amd64 release zip, Expand-Archive it, and add its bin/ folder to PATH (see packaging/README.md)" ;;
+  *) fail "unsupported OS: $os_name. Windows users: download the kvlite-<version>-windows-amd64.tar.gz asset and its .sha256 sidecar from the release, extract with 'tar -xzf' (Windows 10+ ships tar), then add the extracted bin/ folder to PATH (see packaging/README.md)" ;;
 esac
 case "$arch_name" in
   x86_64|amd64) arch="amd64" ;;

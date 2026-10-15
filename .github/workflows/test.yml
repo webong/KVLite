@@ -64,3 +64,80 @@ jobs:
 
       - name: Runtime bundling check
         run: make test-bundle-runtime
+
+  packaging:
+    # The Homebrew formulas, the Debian recipes, and the package table in
+    # packaging/README.md must agree on one placeholder version and cover
+    # every bundle the Debian rules build, and the registry publication jobs
+    # must stay environment gated and OIDC based. No toolchain needed: both
+    # checks are pure Python over the tracked files.
+    name: Packaging and publication contracts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test-packaging
+      - run: make test-publishing
+
+  bundle-runtime-windows:
+    # Proves the Windows half of runtime bundling on a real runner: the
+    # synthetic dependency is copied beside the executable, the import is
+    # intact, and the bundle runs from its own tree and from elsewhere.
+    # Needs cl and dumpbin, hence the MSVC developer environment.
+    name: Windows runtime bundling
+    runs-on: windows-latest
+    steps:
+      # The bash test scripts must stay LF on Windows; the runner's global
+      # config otherwise checks them out with CRLF and breaks the shebang.
+      - run: git config --global core.autocrlf false
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - run: bash scripts/test-bundle-runtime.sh
+        shell: bash
+
+  native-binding-windows:
+    # The embedded Go binding loads its C ABI library with LoadLibrary on
+    # Windows instead of dlopen. cgo on Windows only drives a gcc-compatible
+    # compiler, so this runs under MSYS2/MINGW64; the mock engine is plain C,
+    # which keeps the check independent of a built release bundle.
+    name: Go binding native loader (Windows)
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+
+      - name: Loader tests through the mock C engine
+        shell: msys2 {0}
+        run: go test -run 'TestNative|TestCatalog' -count=1 .
+
+  rocksdb-compat:
+    # Builds the adapter against both ends of the supported
+    # livrocksdb.so.10 range so the claimed v10.8.3-v10.10.1 window stays
+    # true. KVLite's default LZ4 compression is verified during the build.
+    name: RocksDB compatibility range
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - run: make test-rocksdb-compat

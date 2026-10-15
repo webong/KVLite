@@ -1,7 +1,7 @@
 Source: kvlite
 Section: database
 Priority: optional
-Maintainer: KVLite packagers <packages@example.com>
+Maintainer: KVLite packagers <webong@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13), golang-go (>= 1.23), ca-certificates
 Standards-Version: 4.6.2
 Homepage: https://github.com/webong/KVlite
@@ -26,26 +26,53 @@ Description: KVLite LevelDB storage driver bundle (pure Go)
  choice is made for you beyond this package: install it for persistence,
  or serve memory straight from the host package.
 
+Package: kvlite-badgerdb
+Architecture: any
+Depends: kvlite, ${shlibs:Depends}, ${misc:Depends}
+Description: KVLite BadgerDB storage driver bundle (pure Go)
+ The BadgerDB engine as a versioned, checksummed module catalog. No engine
+ choice is made for you beyond this package: install it for persistence,
+ or serve memory straight from the host package.
+
+Package: kvlite-boltdb
+Architecture: any
+Depends: kvlite, ${shlibs:Depends}, ${misc:Depends}
+Description: KVLite BoltDB storage driver bundle (pure Go, bbolt)
+ The BoltDB-compatible engine, backed by the maintained bbolt fork, as a
+ versioned, checksummed module catalog. No engine choice is made for you
+ beyond this package.
+
+Package: kvlite-lmdb
+Architecture: any
+Depends: kvlite, ${shlibs:Depends}, ${misc:Depends}
+Description: KVLite LMDB storage driver bundle (bundled LMDB C source)
+ The LMDB engine as a versioned, checksummed module catalog. Needs no system
+ LMDB library: the pinned binding compiles the bundled LMDB 0.9 C source,
+ and the package ships both the lmdb-go and bundled OpenLDAP notices.
+
 Package: kvlite-http
 Architecture: any
-Depends: kvlite, kvlite-leveldb | kvlite-rocksdb, ${shlibs:Depends}, ${misc:Depends}
+Depends: kvlite, kvlite-leveldb | kvlite-badgerdb | kvlite-boltdb | kvlite-lmdb | kvlite-rocksdb, ${shlibs:Depends}, ${misc:Depends}
 Description: KVLite standalone JSON/HTTP protocol module
  The kvlite-http executable module: a direct owner or an HTTP owner for
  attached Redis processes. Needs the host plus one driver package.
 
 Package: kvlite-redis
 Architecture: any
-Depends: kvlite, kvlite-leveldb | kvlite-rocksdb, ${shlibs:Depends}, ${misc:Depends}
+Depends: kvlite, kvlite-leveldb | kvlite-badgerdb | kvlite-boltdb | kvlite-lmdb | kvlite-rocksdb, ${shlibs:Depends}, ${misc:Depends}
 Description: KVLite standalone Redis-compatible protocol module
  The kvlite-redis executable module: a direct owner or an attached process
  over an HTTP owner. Needs the host plus one driver package.
 
-# Uncomment for distros whose RocksDB development packages you have pinned;
-# set the dependency to your release's library name, e.g.
-#   apt-cache search '^librocksdb'
-# on Debian/Ubuntu. The bundle links the system engine dynamically and
-# verifies it at install time; prefer a --bundle-runtime build wherever the
-# system library cannot be pinned (see packaging/README.md).
+# RocksDB is intentionally not built by default: it needs a native toolchain
+# and the distro library name moves with every SONAME bump. To add it, give
+# this package a name that exists on your target release, e.g.
+#   apt-cache policy 'librocksdb*'
+# then uncomment the stanza, set the dependency, and add "rocksdb" to
+# DRIVER_PACKAGES in debian/rules. The bundle links the system engine
+# dynamically and verifies it at install time (install.sh --no-cli-link, so
+# bin/kvlite stays single-owned); prefer a --bundle-runtime build wherever
+# the system library cannot be pinned (see packaging/README.md).
 #
 # Package: kvlite-rocksdb
 # Architecture: any

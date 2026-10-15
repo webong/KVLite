@@ -27,7 +27,8 @@ the GitHub prerelease.
 
 That installs the pluggable-first base: host CLI plus protocol modules,
 memory only, no persistent engine. Add one with `--driver leveldb`,
-`badgerdb`, `boltdb`, `lmdb`, or `rocksdb`. Useful flags: `--version`, `--prefix`, `--no-http`,
+`badgerdb`, `boltdb`, `lmdb`, or `rocksdb` (not on Windows; see
+[Windows](#windows-mingw-w64-tarballs-like-sqlite)). Useful flags: `--version`, `--prefix`, `--no-http`,
 `--no-redis`, `--shell-rc`, `--yes`. The installer detects the platform,
 verifies the tarball checksum before unpacking, installs through the same
 `scripts/install.sh` path below, verifies every module, and prints the one
@@ -35,14 +36,27 @@ export it needs (`KVLITE_SYSTEM_MODULE_PATH`). A tampered download
 is rejected before anything executes. `make test-install-online` covers the
 whole flow against a local asset server, including tamper rejection.
 
+Release assets also carry a keyless Sigstore build-provenance attestation, so
+a checksum can be traced to the workflow run that produced it:
+
+```sh
+gh attestation verify kvlite-linux-amd64.tar.gz --repo webong/KVLite
+```
+
+The attestation covers the platform tarballs, their `.sha256` sidecars, the
+stamped `kvlite-installer.sh`, and the binding packages attached to the
+release; `release-artifacts.yml` attests them before publishing, so a failed
+attestation aborts the release. Registry packages get their provenance from
+their own registry publication instead.
+
 ## Package split
 
 One installable package per bundle kind, so users install only what they run:
 
 | Package (example name) | Contents | Depends on |
 | --- | --- | --- |
-| `kvlite` | driverless host `bin/kvlite` (core + memory) | nothing |
-| `kvlite-leveldb` | driver bundle, `include/kvlite.h` (no CLI link) | `kvlite` (host drives it) |
+| `kvlite` | driverless host `bin/kvlite` (core + memory), plus `include/kvlite.h` and the C-shared library | nothing |
+| `kvlite-leveldb` | driver bundle (no CLI link) | `kvlite` (host drives it) |
 | `kvlite-badgerdb` | pure-Go BadgerDB driver bundle | `kvlite` |
 | `kvlite-boltdb` | pure-Go bbolt driver bundle | `kvlite` |
 | `kvlite-lmdb` | LMDB CGo driver bundle with statically linked LMDB 0.9 source | `kvlite` |
@@ -113,6 +127,26 @@ root is usable as a single search path (see `MODULES.md`).
   separately, in which case the last package installed must verify the
   assembled tree.
 
+## Stamping recipes for a release
+
+The recipes in `packaging/homebrew` and `packaging/debian` pin a version, so
+they ship a placeholder (`0.1.0`, tag `v0.1.0`) until a packaged release
+exists. Stamp them from the tagged commit before publishing:
+
+```sh
+make stamp-packaging RELEASE_VERSION=v0.2.0
+# or: scripts/stamp-packaging.py v0.2.0 --revision "$(git rev-parse HEAD)"
+```
+
+That rewrites the tag and revision of every formula to one release and
+prepends the matching Debian changelog entry; it edits nothing outside
+`packaging/`, and re-running is a no-op. The release workflow runs
+`scripts/stamp-packaging.py "$version" --check` so a release cannot ship
+recipes still pointing at the placeholder. Every driver, protocol, and host
+bundle that `packaging/debian/rules` builds must have a Debian package, a
+Homebrew formula, and a row in the table above; `make test-packaging` covers
+that agreement.
+
 ## Bring your own engine (composability)
 
 KVLite ships shims, not engines — except where the engine is pure Go and
@@ -149,31 +183,55 @@ there is nothing else to ship. Each driver says exactly what it needs:
   installs Oracle Berkeley DB 18.x themselves and points `BERKELEYDB_CFLAGS`
   / `BERKELEYDB_LDFLAGS` at it. See `extensions/berkeleydb/README.md`.
 
-## Windows (zips, like SQLite)
+## Windows (MinGW-w64 tarballs, like SQLite)
 
 Windows gets no shell installer and no system package from this project —
-mirroring SQLite, which ships per-arch DLL and tools zips, built with MSVC,
-with published checksums and no installer. The Windows story for KVLite is
-the same shape:
+mirroring SQLite, which ships per-arch DLL and tools archives with published
+checksums and no installer. The Windows story for KVLite is the same shape:
 
-- Build on a native Windows runner (MSVC toolchain for CGO, Go 1.23+):
-  `make release DRIVER=rocksdb`, `make release-http`, `make release-redis`,
-  then `make dist-tarballs` — or zip the same tree; both unpack to the
-  identical layout. Publish the zips plus `.sha256` sidecars as release
-  assets.
+- Builds run in MSYS2/MINGW64 on a native Windows runner (Go 1.23+); see the
+  `native-artifacts-windows` job in
+  [`release-artifacts.yml`](../.github/workflows/release-artifacts.yml). They
+  cannot use MSVC: cgo on Windows only drives a gcc-compatible compiler, and
+  a library built by MSVC cannot be linked into a cgo binary — so the
+  toolchain is MinGW-w64 for the Go driver packages and for anything C they
+  link.
+- The job builds `make release DRIVER=leveldb|badgerdb|boltdb|lmdb`, the
+  driverless host bundle (`DRIVER=none`: CLI, `kvlite.dll`, `kvlite.h`), and
+  `make release-http`/`release-redis`, then `make dist-tarballs`. Windows
+  publishes the same `kvlite-VERSION-windows-amd64.tar.gz` plus `.sha256`
+  sidecar as every other target — one archive format and one installer story
+  across all five targets, rather than a separate zip convention.
+- **RocksDB has no Windows bundle yet.** The pinned `grocksdb` links `-ldl`
+  in its cgo flags, and MinGW-w64 ships no `libdl`, so its default link line
+  cannot build for Windows. A Windows RocksDB bundle needs the
+  `grocksdb_no_link` build tag with an explicit `CGO_LDFLAGS` plus the C++
+  runtime and compression DLLs bundled beside the executables. Until that
+  lands, the Windows job stays deliberately RocksDB-free and a Windows
+  install offers the four other engines.
 - Native dependencies need no path surgery: Windows looks in the
   application's own folder first, so `--bundle-runtime` copies DLLs beside
   the `.exe` files (`dumpbin` or `objdump` lists them). Users add one folder
   (`bin/`) to `PATH` and everything — including `kvlite.dll` loaded by
-  language bindings — resolves. This path compiles but still awaits proof
-  on a real runner; `dumpbin -dependents` on the outputs is the check.
+  language bindings — resolves. The mechanism is exercised on Windows by
+  `make test-bundle-runtime`; `dumpbin -dependents` on the outputs remains
+  the manual check. No Windows bundle needs it yet, because the four shipped
+  drivers link their C statically.
+- The Windows job verifies bundle layout, module descriptors, and that every
+  built executable starts (a missing runtime DLL fails there, not in a user's
+  shell). It does not yet point the Go binding at a built Windows bundle the
+  way the Linux/macOS jobs do through `KVLITE_TEST_NATIVE_LIBRARY`: loading a
+  Go-built driver module into a Go process is only proven on Linux and macOS
+  ARM. The binding's `LoadLibrary` path is covered instead by the
+  `native-binding-windows` job in [`test.yml`](../.github/workflows/test.yml)
+  against an ABI-compatible C mock.
 - Install location: `%ProgramFiles%\KVLite` (per-machine) or
   `%LocalAppData%\KVLite` (per-user), with `KVLITE_SYSTEM_MODULE_PATH`
   pointing at its `lib\kvlite` catalog. `scripts/install.sh` runs under Git
   Bash with `--target windows-amd64`; symlinks fall back to copies where
   privileges are missing.
 - Community managers (winget, Chocolatey, Scoop) stay community efforts, as
-  with SQLite — the release zips plus checksums are the complete input
+  with SQLite — the release tarballs plus checksums are the complete input
   they need.
 
 ## Obligations that stay with the publisher
@@ -185,5 +243,8 @@ the same shape:
 - **Provenance.** Manifest checksums prove integrity (nothing runs or loads
   before `verify` passes), not provenance. The manager's own signatures
   cover transport; repository-level release signing is still open.
-- **RocksDB range.** Stay within the tested `v10.8.3`–`v10.10.1` range or
-  re-run `make test-rocksdb-compat` for the pinned version first.
+- **RocksDB range.** CI builds the adapter against both ends of the
+  supported `v10.8.3`–`v10.10.1` range on every change; stay within that
+  window, or extend it and re-run `make test-rocksdb-compat` locally first.
+  The next 10.x line, `v11.x`, changes the shared-library SONAME major, so it
+  is a packaging change rather than a range bump.

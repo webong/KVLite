@@ -1,4 +1,4 @@
-.PHONY: test test-race test-rocksdb test-rocksdb-docker test-rocksdb-compat test-berkeleydb test-bindings-docker test-bindings-leveldb test-standalone-modules test-bundle-runtime test-install-online vet build-cli build-c-shared release release-cli release-c-shared release-berkeleydb release-http release-redis release-runtime dist-tarballs install
+.PHONY: test test-race test-rocksdb test-rocksdb-docker test-rocksdb-compat test-berkeleydb test-bindings-docker test-bindings-leveldb test-standalone-modules test-bundle-runtime test-install-online test-packaging test-publishing stamp-packaging vet build-cli build-c-shared release release-cli release-c-shared release-berkeleydb release-http release-redis release-runtime dist-tarballs install
 
 RELEASE_VERSION ?= dev
 RELEASE_TARGET ?= $(shell go env GOHOSTOS)-$(shell go env GOHOSTARCH)
@@ -140,3 +140,20 @@ dist-tarballs:
 # End-to-end online-installer check against a local asset server.
 test-install-online:
 	bash ./scripts/test-install-online.sh
+
+# Packaging recipes: every Homebrew formula and both Debian files must agree
+# on one version, and every bundle the Debian rules build must have a Debian
+# package, a formula, and a row in the packaging/README.md table.
+test-packaging:
+	python3 -m unittest scripts/test_stamp_packaging.py
+
+# Registry publication contract: every destination stays opt-in, environment
+# gated, OIDC based (no registry secret in the workflow), and downstream of a
+# published GitHub Release.
+test-publishing:
+	python3 -m unittest scripts/test_registry_publication.py
+
+# Point the recipes at a release tag and prepend its Debian changelog entry,
+# e.g.: make stamp-packaging RELEASE_VERSION=v0.2.0
+stamp-packaging:
+	python3 scripts/stamp-packaging.py "$(RELEASE_VERSION)"

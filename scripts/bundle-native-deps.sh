@@ -59,6 +59,10 @@ crypt32.dll|bcrypt.dll|ncrypt.dll|secur32.dll|credui.dll|mswsock.dll|\
 comctl32.dll|shlwapi.dll|version.dll|winmm.dll|winspool.dll|imm32.dll|\
 usp10.dll|msimg32.dll|dwmapi.dll|uxtheme.dll|ntdll.dll|kernelbase.dll|\
 msvcrt.dll|ucrtbase.dll|api-ms-*|ext-ms-*) return 0 ;;
+    # The Visual C++ runtime is a platform prerequisite exactly as
+    # libgcc_s is on Linux: redistributable, never relicensed into a
+    # bundle, and never copied into one.
+    vcruntime*.dll|msvcp*.dll|vccorlib*.dll|concrt*.dll) return 0 ;;
   esac
   return 1
 }
@@ -73,9 +77,9 @@ case "$os" in
     command -v patchelf >/dev/null 2>&1 || fail "patchelf is required to bundle linux runtime libraries"
     ;;
   windows)
-    # Untested on a Windows runner so far; the copy-beside-exe mechanism is
-    # standard loader behavior, but treat the first runner proof as required.
-    printf 'bundle-native-deps: WARNING: Windows bundling awaits runner proof; verify with dumpbin -dependents\n' >&2
+    # Copy-beside-exe is standard loader behavior. `make test-bundle-runtime`
+    # proves it on a Windows runner (MSVC shell: cl plus dumpbin); run it
+    # there before trusting a Windows runtime bundle.
     if command -v dumpbin >/dev/null 2>&1; then
       dep_tool="dumpbin"
     elif command -v objdump >/dev/null 2>&1; then
@@ -146,6 +150,21 @@ dependencies_for_windows() {
   fi
 }
 
+# MSYS2/Git Bash separate PATH-like values with ":", native Windows shells
+# with ";". Native values also contain ":" from drive letters, so ";" wins
+# whenever it is present; a single entry has no separator at either kind and
+# still resolves as one directory.
+windows_path_separator() {
+  local value="$1"
+  if [[ "$value" == *";"* ]]; then
+    printf ';'
+  elif [[ "$value" == *":"* ]]; then
+    printf ':'
+  else
+    printf ';'
+  fi
+}
+
 # Resolve a bare library name (no directory part, as recorded by linkers
 # that use -install_name filenames or -l names) to a file: beside the
 # binary first, then KVLITE_BUNDLE_LIB_PATH, a path-list of link-time
@@ -160,7 +179,9 @@ resolve_bare_dependency() {
   fi
   local search="${KVLITE_BUNDLE_LIB_PATH:-}"
   local separator=":"
-  [[ "$os" == "windows" ]] && separator=";"
+  if [[ "$os" == "windows" ]]; then
+    separator="$(windows_path_separator "$search")"
+  fi
   local dir
   local saved_ifs="$IFS"
   IFS="$separator"
@@ -269,7 +290,7 @@ for _ in $(seq 1 10); do
           dep="$resolved"
         elif [[ "$os" == "windows" ]]; then
           saved_path_ifs="$IFS"
-          IFS=';'
+          IFS="$(windows_path_separator "$PATH")"
           for path_dir in $PATH; do
             if [[ -f "$path_dir/$dep" ]]; then
               resolved="$path_dir/$dep"

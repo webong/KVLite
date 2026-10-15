@@ -6,7 +6,7 @@ Research date: 2026-09-29; PHP publication path updated 2026-09-30. This is a pu
 
 The repository-root [`go.mod`](../go.mod) is the thin `github.com/webong/kvlite` Go binding. The repository-root [`composer.json`](../composer.json) publishes `kvlite/kvlite` and maps its PHP autoloader to `lib/bindings/php/src`; the nested [`composer.json`](../lib/bindings/php/composer.json) remains for local binding development. The other package manifests are [`pyproject.toml`](../lib/bindings/python/pyproject.toml) (`usekvlite`, imported as `kvlite`), [`package.json`](../lib/bindings/node/package.json) (`usekvlite`), [`kvlite.gemspec`](../lib/bindings/ruby/kvlite.gemspec) (`kvlite`), and [`Cargo.toml`](../lib/bindings/rust/Cargo.toml) (`usekvlite`, library crate `kvlite`). The npm and Cargo manifests were renamed after the original collision research. These are *thin bindings*; embedded use additionally requires a compatible KVLite host/native engine bundle, as [`lib/bindings/README.md`](../lib/bindings/README.md) describes. Registry package installation by itself does not install a database engine.
 
-[`release-artifacts.yml`](../.github/workflows/release-artifacts.yml) accepts a stable `vX.Y.Z` tag and publishes a canary on every `main` push (or an explicit `publish_canary` dispatch from `main`). A canary uses `v0.1.0-canary.N`, creates a GitHub prerelease tag after the three native targets and bindings pass, and attaches native and language package artifacts. [`stage-language-bindings.py`](../scripts/stage-language-bindings.py) translates the canary into Python `.devN`, npm/Rust SemVer prereleases, and a RubyGems prerelease without editing source. [`package-language-bindings.sh`](../scripts/package-language-bindings.sh) validates and packages them. The four registry upload jobs remain separately gated by `KVLITE_PUBLISH_PYPI`, `KVLITE_PUBLISH_NPM`, `KVLITE_PUBLISH_RUBY`, and `KVLITE_PUBLISH_CRATES`; a GitHub prerelease alone is not a registry publish. PHP uses Packagist's repository indexing rather than a CI upload job. Existing GitHub releases are never overwritten. See also the [`binding publication contract`](../lib/bindings/README.md#release-ci).
+[`release-artifacts.yml`](../.github/workflows/release-artifacts.yml) accepts a stable `vX.Y.Z` tag and publishes a canary on every `main` push (or an explicit `publish_canary` dispatch from `main`). A canary uses `v0.1.0-canary.N`, creates a GitHub prerelease tag after the five native targets and bindings pass, and attaches native and language package artifacts. [`stage-language-bindings.py`](../scripts/stage-language-bindings.py) translates the canary into Python `.devN`, npm/Rust SemVer prereleases, and a RubyGems prerelease without editing source. [`package-language-bindings.sh`](../scripts/package-language-bindings.sh) validates and packages them. The four registry upload jobs remain separately gated by `KVLITE_PUBLISH_PYPI`, `KVLITE_PUBLISH_NPM`, `KVLITE_PUBLISH_RUBY`, and `KVLITE_PUBLISH_CRATES`; a GitHub prerelease alone is not a registry publish. PHP uses Packagist's repository indexing rather than a CI upload job. Existing GitHub releases are never overwritten. See also the [`binding publication contract`](../lib/bindings/README.md#release-ci).
 
 ## Registry-by-registry first release
 
@@ -21,11 +21,39 @@ The repository-root [`go.mod`](../go.mod) is the thin `github.com/webong/kvlite`
 
 For every OIDC provider, the repository/workflow filename/environment must match the registry configuration exactly. npm additionally requires the installed npm CLI and Node versions noted above, and its new trusted-publisher configuration must explicitly permit direct `npm publish` if that is the chosen workflow action. Neither a local package archive nor a successful GitHub Release proves registry ownership or publication. [npm trusted-publisher configuration](https://docs.npmjs.com/trusted-publishers/), [PyPI trusted-publisher action](https://docs.pypi.org/trusted-publishers/using-a-publisher/), [RubyGems trusted publisher](https://guides.rubygems.org/trusted-publishing/).
 
+## OIDC configuration and the workflow contract
+
+Each trusted publisher must be registered with the same three facts, and each
+workflow job must match them exactly:
+
+| Registry | Owner/repository | Workflow file | Environment | Opt-in variable |
+| --- | --- | --- | --- | --- |
+| PyPI | `webong/KVLite` | `release-artifacts.yml` | `pypi` | `KVLITE_PUBLISH_PYPI` |
+| npm | `webong/KVLite` | `release-artifacts.yml` | `npm` | `KVLITE_PUBLISH_NPM` |
+| RubyGems | `webong/KVLite` | `release-artifacts.yml` | `rubygems` | `KVLITE_PUBLISH_RUBY` |
+| crates.io | `webong/KVLite` | `release-artifacts.yml` | `crates-io` | `KVLITE_PUBLISH_CRATES` |
+
+The workflow carries no registry secret: every publish job holds
+`id-token: write`, runs inside its protected environment, and only executes
+when its repository variable is `true` and the GitHub Release already exists.
+`make test-publishing` enforces that contract, together with the npm detail
+below, so a later edit cannot quietly reintroduce a stored token.
+
+npm needs one extra caution. `actions/setup-node` writes
+`//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into the runner's
+`.npmrc` whenever `registry-url` is set. With no token configured — the point
+of trusted publishing — that placeholder expands to an empty string, the npm
+CLI treats authentication as already configured, and it never starts the OIDC
+exchange, failing with `ENEEDAUTH` or a 404 from the registry. The publish job
+therefore sets only the Node version, and `make test-publishing` fails if
+`registry-url` or `NODE_AUTH_TOKEN` returns to that job. [setup-node
+`registry-url` breaks the OIDC trigger](https://github.com/npm/documentation/issues/1960).
+
 ## Native host and engine bundles: the shared prerequisite
 
-The binding packages do not vendor native storage engines. The release workflow builds a driverless host, LevelDB/BadgerDB/BoltDB/LMDB/RocksDB engine bundles, and HTTP/Redis transport bundles for **linux-amd64, darwin-amd64, darwin-arm64**; then it publishes three tarballs, three SHA-256 sidecars, and `kvlite-installer.sh` as GitHub Release assets. It does not currently build Linux arm64 or Windows. These facts come from [`release-artifacts.yml`](../.github/workflows/release-artifacts.yml) and [`make-release-tarballs.sh`](../scripts/make-release-tarballs.sh), not a confirmed live release. The installer verifies an archive checksum and installed modules; checksums establish integrity, not provenance. See [`install-online.sh`](../scripts/install-online.sh) and [`packaging/README.md`](README.md).
+The binding packages do not vendor native storage engines. The release workflow builds a driverless host, LevelDB/BadgerDB/BoltDB/LMDB/RocksDB engine bundles, and HTTP/Redis transport bundles for **linux-amd64, linux-arm64, darwin-amd64, darwin-arm64**, and publishes four tarballs, four SHA-256 sidecars, and `kvlite-installer.sh` as GitHub Release assets. **windows-amd64** then adds a fifth target: LevelDB/BadgerDB/BoltDB/LMDB plus the host and both transports built in MSYS2/MinGW-w64 (cgo cannot use MSVC), published as a fifth tarball with its sidecar, deliberately without RocksDB because the pinned `grocksdb` links `-ldl`, which MinGW-w64 does not provide. These facts come from [`release-artifacts.yml`](../.github/workflows/release-artifacts.yml) and [`make-release-tarballs.sh`](../scripts/make-release-tarballs.sh), not a confirmed live release. The installer verifies an archive checksum and installed modules; checksums establish integrity, while provenance now comes from the keyless Sigstore attestation [`release-artifacts.yml`](../.github/workflows/release-artifacts.yml) creates for the tarballs, their sidecars, the stamped installer, and the attached binding packages before it publishes them (verify with `gh attestation verify <asset> --repo webong/KVLite`). That step requires the repository to stay public and has not yet been exercised by a live release. See [`install-online.sh`](../scripts/install-online.sh) and [`packaging/README.md`](README.md).
 
-The release workflow now stamps the attached [`installer`](../scripts/install-online.sh) with its concrete release version, so its default download matches [`make-release-tarballs.sh`](../scripts/make-release-tarballs.sh); [`test-install-online.sh`](../scripts/test-install-online.sh) covers that stamped default. The source-tree installer still defaults to `latest` and should be run with an explicit `--version` outside a release. The installer accepts `linux-arm64` despite the missing corresponding release job; reject it clearly or build/test that target before advertising it. GitHub's `releases/latest` URL selects stable releases, not canaries; canary users need their prerelease URL.
+The release workflow now stamps the attached [`installer`](../scripts/install-online.sh) with its concrete release version, so its default download matches [`make-release-tarballs.sh`](../scripts/make-release-tarballs.sh); [`test-install-online.sh`](../scripts/test-install-online.sh) covers that stamped default. The source-tree installer still defaults to `latest` and should be run with an explicit `--version` outside a release. The installer already maps an aarch64 Linux host to `linux-arm64`, which the release matrix now builds on the native `ubuntu-24.04-arm` runner; that target still needs a live release run to be verified. GitHub's `releases/latest` URL selects stable releases, not canaries; canary users need their prerelease URL.
 
 ## Release gates and honest README claims
 

@@ -10,8 +10,7 @@
 class KvliteRocksdb < Formula
   desc "KVLite key-value store with the RocksDB storage driver (system engine)"
   homepage "https://github.com/webong/KVlite"
-  # Pin tag and revision to the published release when cutting one; the tag
-  # below is a placeholder until the first packaged release exists.
+  # Tag and revision are stamped by scripts/stamp-packaging.py at release time.
   url "https://github.com/webong/KVlite.git",
       tag: "v0.1.0"
   license "Apache-2.0"

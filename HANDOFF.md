@@ -25,8 +25,19 @@ before this handoff document was added
 > for the process lifetime. The native loader now checks registered
 > capabilities against the manifest, and public `Open` tests cover older and
 > newer module ABI manifests. Remaining checks: native CI proof for the first
-> real RocksDB runtime bundle; Windows runtime-bundle proof; and release
-> signing beyond checksums.
+> real RocksDB runtime bundle; a first CI pass of the new `windows-amd64`
+> release job (MSYS2/MinGW-w64; the four non-RocksDB drivers, host, and
+> transports) — Windows cannot use MSVC under cgo, and the pinned `grocksdb`
+> links `-ldl`, so a Windows RocksDB bundle stays open. Windows runtime-bundle
+> proof now runs in `test.yml` as `bundle-runtime-windows`. Registry
+> publication stays opt-in per destination and OIDC-only; `make test-publishing`
+> now guards that contract (environment, `id-token: write`, no stored secret,
+> and the npm `registry-url` trap) without needing any registry credentials.
+> Release signing
+> beyond checksums is now configured: `release-artifacts.yml` attests the
+> tarballs, sidecars, stamped installer, and binding packages with a keyless
+> Sigstore build-provenance attestation before publishing them (a live
+> release has not exercised it yet).
 
 > **Driver expansion, 2026-09-25:** `badgerdb`, `boltdb` (implemented with
 > bbolt), and `lmdb` are now separate optional modules under `extensions/`.

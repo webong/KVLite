@@ -30,6 +30,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       channel: ${{ steps.version.outputs.channel }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: version
         shell: bash
         env:
@@ -61,6 +63,16 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
+      # A stable release must ship Homebrew/Debian recipes that point at its
+      # own tag, not the pre-release placeholder. Canaries stay unstamped.
+      - name: Packaging recipes match the release tag
+        if: steps.version.outputs.channel == 'stable'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 scripts/stamp-packaging.py "$VERSION" \
+            --revision "$GITHUB_SHA" --check
+
   native-artifacts:
     name: ${{ matrix.target }}
     needs: prepare
@@ -70,6 +82,11 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: linux-amd64
+          # ubuntu-24.04-arm is a separate native arm64 runner: KVLite never
+          # cross-compiles RocksDB. The installer already maps aarch64 hosts
+          # to linux-arm64, so this target completes that promise.
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
           # macos-13 (the last Intel label before it) was retired by GitHub
           # in December 2025; macos-15-intel is the final Intel macOS
           # runner (itself retired August 2027). Revisit then.
@@ -293,13 +310,126 @@ jobs:
             dist/kvlite-*.tar.gz.sha256
           if-no-files-found: error
 
+  native-artifacts-windows:
+    # Windows builds inside MSYS2/MINGW64, not cmd: Go's cgo requires a
+    # gcc-compatible compiler there, and a library built by MSVC cannot be
+    # linked by cgo. The four pure-Go/C drivers, the host CLI, the C ABI
+    # library, and the two protocol executables all build with MinGW-w64.
+    # RocksDB is deliberately absent: the pinned grocksdb passes -ldl in its
+    # cgo flags and MinGW-w64 has no libdl, so a Windows RocksDB bundle needs
+    # the grocksdb_no_link tag plus explicit CGO_LDFLAGS and bundled C++
+    # runtime DLLs. See "Windows (MinGW-w64)" in packaging/README.md.
+    name: windows-amd64
+    needs: prepare
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      # Release scripts are bash and must keep LF endings; the runner image's
+      # global git config would otherwise check them out with CRLF.
+      - run: git config --global core.autocrlf false
+        shell: bash
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make
+            coreutils
+            tar
+            mingw-w64-x86_64-gcc
+      - name: Toolchain versions
+        run: |
+          go version
+          gcc --version | head -n 1
+          make --version | head -n 1
+      - name: Driver tests (four Go and cgo drivers)
+        run: |
+          go test ./extensions/leveldb/... ./extensions/badgerdb/... \
+            ./extensions/boltdb/... ./extensions/lmdb/...
+      - name: Build native artifacts
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          for driver in leveldb badgerdb boltdb lmdb; do
+            make release RELEASE_VERSION="$version" \
+              RELEASE_TARGET=windows-amd64 DRIVER="$driver"
+          done
+          make release RELEASE_VERSION="$version" RELEASE_TARGET=windows-amd64 DRIVER=none
+          make release-http RELEASE_VERSION="$version" RELEASE_TARGET=windows-amd64
+          make release-redis RELEASE_VERSION="$version" RELEASE_TARGET=windows-amd64
+      - name: Verify bundle layout and descriptors
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          root="dist/$version/windows-amd64"
+          # The bundle CLIs are native executables: they cannot read an MSYS2
+          # POSIX path, so hand them the Windows spelling of the bundle root.
+          export KVLITE_HOME="$(cygpath -w "$PWD/$root")"
+          for driver in leveldb badgerdb boltdb lmdb; do
+            for expected in "bin/kvlite.exe" "lib/kvlite.dll" "include/kvlite.h"; do
+              [[ -f "$root/drivers/$driver/$expected" ]] || {
+                echo "missing release file: drivers/$driver/$expected" >&2
+                exit 1
+              }
+            done
+            "$root/drivers/$driver/bin/kvlite.exe" module verify "$driver"
+          done
+          [[ -f "$root/host/bin/kvlite.exe" \
+            && -f "$root/host/lib/kvlite.dll" \
+            && -f "$root/host/include/kvlite.h" ]] || {
+            echo "missing host executable, C ABI library, or header" >&2
+            exit 1
+          }
+          for transport in http redis; do
+            [[ -f "$root/modules/$transport/bin/kvlite-$transport.exe" ]] || {
+              echo "missing release file: modules/$transport/bin/kvlite-$transport.exe" >&2
+              exit 1
+            }
+          done
+          # Starting each binary proves it loads: a cgo-built executable that
+          # cannot find a runtime DLL fails here instead of in a user's shell.
+          for executable in \
+            "$root/host/bin/kvlite.exe" \
+            "$root/modules/http/bin/kvlite-http.exe" \
+            "$root/modules/redis/bin/kvlite-redis.exe"; do
+            "$executable" --help >/dev/null
+          done
+          for driver in leveldb badgerdb boltdb lmdb; do
+            "$root/drivers/$driver/bin/kvlite.exe" --help >/dev/null
+          done
+      - name: Pack release tarballs
+        run: |
+          make dist-tarballs RELEASE_VERSION="${{ needs.prepare.outputs.version }}" \
+            RELEASE_TARGET=windows-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kvlite-windows-amd64
+          path: dist/*/windows-amd64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kvlite-release-windows-amd64
+          path: |
+            dist/kvlite-*.tar.gz
+            dist/kvlite-*.tar.gz.sha256
+          if-no-files-found: error
+
   github-release:
     name: Publish verified GitHub Release
-    needs: [prepare, native-artifacts, binding-packages]
+    needs: [prepare, native-artifacts, native-artifacts-windows, binding-packages]
     if: needs.prepare.outputs.channel != 'build' && github.repository == 'webong/KVLite'
     runs-on: ubuntu-24.04
+    # contents: write creates the release; id-token/attestations let the
+    # keyless Sigstore attestation below bind the published assets to this
+    # workflow run, which is the provenance the SHA-256 sidecars cannot give.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -323,7 +453,8 @@ jobs:
         with:
           name: binding-rust
           path: release-assets/bindings/rust
-      - name: Verify and publish all platform assets
+      - name: Verify platform assets
+        id: verify
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -333,8 +464,8 @@ jobs:
           shopt -s nullglob
           tarballs=(release-assets/kvlite-*.tar.gz)
           checksums=(release-assets/kvlite-*.tar.gz.sha256)
-          if [[ ${#tarballs[@]} -ne 3 || ${#checksums[@]} -ne 3 ]]; then
-            echo "Expected three platform tarballs and matching checksums" >&2
+          if [[ ${#tarballs[@]} -ne 5 || ${#checksums[@]} -ne 5 ]]; then
+            echo "Expected five platform tarballs and matching checksums" >&2
             exit 1
           fi
           (cd release-assets && sha256sum -c ./*.tar.gz.sha256)
@@ -353,11 +484,40 @@ jobs:
             echo "Release already exists; refusing to replace immutable assets" >&2
             exit 1
           fi
-          release_flags=(--title "KVLite $RELEASE_VERSION" --generate-notes)
           if [[ "$RELEASE_CHANNEL" == 'stable' ]]; then
-            release_flags+=(--verify-tag)
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Attest before publishing: a failed attestation aborts the job, so a
+      # release never ships without provenance. Anyone can then check an
+      # asset with: gh attestation verify <asset> --repo webong/KVLite
+      - name: Attest release artifacts (build provenance)
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-assets/kvlite-*.tar.gz
+            release-assets/kvlite-*.tar.gz.sha256
+            release-assets/kvlite-installer.sh
+            release-assets/bindings/*/*
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ steps.verify.outputs.prerelease }}
+        run: |
+          shopt -s nullglob
+          tarballs=(release-assets/kvlite-*.tar.gz)
+          checksums=(release-assets/kvlite-*.tar.gz.sha256)
+          packages=(release-assets/bindings/*/*)
+          release_flags=(--title "KVLite $RELEASE_VERSION" --generate-notes)
+          if [[ "$PRERELEASE" == 'true' ]]; then
             release_flags+=(--prerelease --target "$GITHUB_SHA")
+          else
+            release_flags+=(--verify-tag)
           fi
           gh release create "$RELEASE_VERSION" "${tarballs[@]}" "${checksums[@]}" "${packages[@]}" release-assets/kvlite-installer.sh "${release_flags[@]}"
 
@@ -474,10 +634,16 @@ jobs:
         with:
           name: binding-node
           path: dist
+      # Deliberately no registry-url: setup-node would then write
+      # //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} into the runner's
+      # .npmrc. Trusted publishing expects no token, so that placeholder
+      # expands to empty, npm treats auth as configured, and the OIDC exchange
+      # never happens (ENEEDAUTH or a 404 from the registry).
+      # https://github.com/npm/documentation/issues/1960
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: https://registry.npmjs.org
+      # The OIDC exchange needs npm 11.5.1 or newer.
       - run: npm install --global 'npm@^11.5.1'
       - name: Publish the validated tarball
         shell: bash
