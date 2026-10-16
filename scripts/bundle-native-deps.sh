@@ -148,9 +148,11 @@ dependencies_for_windows() {
   # (reported as a missing dependency) and "libfoo.dll" into a name that
   # resolves to no file on disk.
   if [[ "$dep_tool" == "dumpbin" ]]; then
-    # tolower instead of the /i regex flag: mawk ignores that flag and matches
+    # A dash rather than a slash before the option: MSYS2 shells read
+    # "/dependents" as an absolute path and rewrite it before dumpbin sees it.
+    # tolower rather than the /i regex flag: mawk ignores that flag and matches
     # nothing, which would silently skip every dependency.
-    dumpbin /dependents "$1" 2>/dev/null | tr -d '\r' | awk '/\.dll/ { for (i = 1; i <= NF; i++) if (tolower($i) ~ /\.dll$/) print $i }' | sort -u
+    dumpbin -dependents "$1" 2>/dev/null | tr -d '\r' | awk '/\.dll/ { for (i = 1; i <= NF; i++) if (tolower($i) ~ /\.dll$/) print $i }' | sort -u
   else
     objdump -p "$1" 2>/dev/null | tr -d '\r' | awk '/DLL Name:/ { print $NF }' | sort -u
   fi
@@ -275,7 +277,9 @@ for _ in $(seq 1 10); do
         fail "dependency $missing of $binary is not resolvable (ldd reports 'not found'); link with an rpath, set LD_LIBRARY_PATH so it resolves, or point KVLITE_BUNDLE_LIB_PATH at its directory"
       done < <(unresolved_for_linux "$binary")
     fi
-    deps="$(list_dependencies "$binary")" || deps=""
+    # A tool that cannot list dependencies must not be mistaken for a binary
+    # that has none: that is how an incomplete bundle ships silently.
+    deps="$(list_dependencies "$binary")" || fail "could not list the dependencies of $binary with $dep_tool"
     while IFS= read -r dep; do
       [[ -n "$dep" ]] || continue
       case "$dep" in

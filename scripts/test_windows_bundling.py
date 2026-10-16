@@ -13,6 +13,7 @@ Both run anywhere the release scripts run, with no Windows toolchain.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -86,6 +87,18 @@ class WindowsBundlingTest(unittest.TestCase):
             "a system DLL was treated as a bundle dependency",
         )
         self.assertNotIn("KERNEL32.dll\r", result.stderr, "a trailing CR reached a dependency name")
+
+    def test_native_windows_tools_are_not_called_with_slash_options(self) -> None:
+        # An MSYS2 shell reads a "/option" argument as an absolute path and
+        # rewrites it before the tool sees it. The failure surfaces as an
+        # empty dependency list, which reads like a binary without any.
+        slash_option = re.compile(r"\b(dumpbin|cl|link|rc|mt)\s+/")
+        offenders = []
+        for script in sorted((ROOT / "scripts").glob("*.sh")):
+            for number, line in enumerate(script.read_text().splitlines(), start=1):
+                if slash_option.search(line):
+                    offenders.append(f"{script.name}:{number}")
+        self.assertEqual(offenders, [])
 
     def test_release_manifest_reads_binary_mode_checksums(self) -> None:
         # hash_for is lifted from the release script itself, so this cannot
