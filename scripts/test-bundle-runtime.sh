@@ -96,8 +96,16 @@ list_dependencies() {
     windows)
       # CRLF from the native tool would leave a trailing CR on every name, and
       # tolower keeps the match working under mawk, which ignores the /i flag.
-      dumpbin -dependents "$1" 2>/dev/null | tr -d '\r' | \
-        awk '/\.dll/ { for (i = 1; i <= NF; i++) if (tolower($i) ~ /\.dll$/) print $i }' | sort -u
+      # Only indented single names count: dumpbin's banner ends in .dll when it
+      # dumps a DLL, and that is the file being inspected, not a dependency.
+      dumpbin -dependents "$1" 2>/dev/null | tr -d '\r' | awk '
+        {
+          name = $0
+          sub(/^[ \t]+/, "", name)
+          sub(/[ \t]+$/, "", name)
+          if (name == $0 || name ~ /[ \t]/) next
+          if (tolower(name) ~ /\.dll$/) print name
+        }' | sort -u
       ;;
   esac
 }

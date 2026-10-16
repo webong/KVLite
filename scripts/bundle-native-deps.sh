@@ -150,9 +150,19 @@ dependencies_for_windows() {
   if [[ "$dep_tool" == "dumpbin" ]]; then
     # A dash rather than a slash before the option: MSYS2 shells read
     # "/dependents" as an absolute path and rewrite it before dumpbin sees it.
+    # The listing is indented and holds one bare name per line; dumpbin's own
+    # banner ("Dump of file C:\...\kvlite.dll") is not indented, ends in .dll
+    # for a DLL, and must never be read as a dependency of the file itself.
     # tolower rather than the /i regex flag: mawk ignores that flag and matches
     # nothing, which would silently skip every dependency.
-    dumpbin -dependents "$1" 2>/dev/null | tr -d '\r' | awk '/\.dll/ { for (i = 1; i <= NF; i++) if (tolower($i) ~ /\.dll$/) print $i }' | sort -u
+    dumpbin -dependents "$1" 2>/dev/null | tr -d '\r' | awk '
+      {
+        name = $0
+        sub(/^[ \t]+/, "", name)
+        sub(/[ \t]+$/, "", name)
+        if (name == $0 || name ~ /[ \t]/) next
+        if (tolower(name) ~ /\.dll$/) print name
+      }' | sort -u
   else
     objdump -p "$1" 2>/dev/null | tr -d '\r' | awk '/DLL Name:/ { print $NF }' | sort -u
   fi

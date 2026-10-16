@@ -24,12 +24,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLER = ROOT / "scripts/bundle-native-deps.sh"
 BUILD_RELEASE = ROOT / "scripts/build-release.sh"
-# A dependency listing the way dumpbin writes it: CRLF line endings, system
-# DLLs, API sets, and one library that must reach the bundle.
+# A dependency listing the way dumpbin writes it: a banner naming the file
+# being inspected (in the Windows spelling MSYS2 hands it), CRLF line endings,
+# system DLLs, API sets, and one library that must reach the bundle.
 DUMPBIN = (
     "#!/usr/bin/env bash\n"
-    "printf 'Dump of file prog.exe\\r\\n\\r\\n"
-    "File Type: EXECUTABLE IMAGE\\r\\n\\r\\n"
+    "printf 'Dump of file C:\\\\inspected\\\\%s\\r\\n\\r\\n' \"$(basename \"$2\")\"\n"
+    "printf 'File Type: EXECUTABLE IMAGE\\r\\n\\r\\n"
     "  Image has the following dependencies:\\r\\n\\r\\n"
     "    KERNEL32.dll\\r\\n"
     "    libkvliteweirdep.dll\\r\\n"
