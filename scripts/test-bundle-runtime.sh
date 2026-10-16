@@ -94,7 +94,8 @@ list_dependencies() {
     darwin) otool -L "$1" 2>/dev/null | awk 'NR > 1 { print $1 }' ;;
     linux) ldd "$1" 2>/dev/null || true ;;
     windows)
-      dumpbin -dependents "$1" 2>/dev/null | \
+      # CRLF from the native tool would leave a trailing CR on every name.
+      dumpbin -dependents "$1" 2>/dev/null | tr -d '\r' | \
         awk '/\.dll/ { for (i = 1; i <= NF; i++) if ($i ~ /\.dll$/i) print $i }' | sort -u
       ;;
   esac

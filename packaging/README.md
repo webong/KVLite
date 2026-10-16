@@ -145,7 +145,8 @@ prepends the matching Debian changelog entry; it edits nothing outside
 recipes still pointing at the placeholder. Every driver, protocol, and host
 bundle that `packaging/debian/rules` builds must have a Debian package, a
 Homebrew formula, and a row in the table above; `make test-packaging` covers
-that agreement.
+that agreement together with the Windows dependency-listing and checksum
+formats, which are simulated there because the unix jobs never see them.
 
 ## Bring your own engine (composability)
 

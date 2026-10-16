@@ -411,7 +411,12 @@ fi
 
 hash_for() {
   local artifact_path="$1"
-  awk -v artifact_path="$artifact_path" '$2 == artifact_path { print $1; exit }' "$staging_dir/SHA256SUMS"
+  # GNU coreutils marks binary-mode entries with a leading "*" on Windows,
+  # so the recorded path is not the field verbatim.
+  awk -v artifact_path="$artifact_path" '
+    { path = $2; sub(/^\*/, "", path); sub(/\r$/, "", path) }
+    path == artifact_path { print $1; exit }
+  ' "$staging_dir/SHA256SUMS"
 }
 
 write_module_manifest() {

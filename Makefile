@@ -145,7 +145,7 @@ test-install-online:
 # on one version, and every bundle the Debian rules build must have a Debian
 # package, a formula, and a row in the packaging/README.md table.
 test-packaging:
-	python3 -m unittest scripts/test_stamp_packaging.py
+	python3 -m unittest scripts/test_stamp_packaging.py scripts/test_windows_bundling.py
 
 # Registry publication contract: every destination stays opt-in, environment
 # gated, OIDC based (no registry secret in the workflow), and downstream of a

@@ -27,7 +27,9 @@ func buildMock(t *testing.T, extraFlags ...string) string {
 	case "windows":
 		// Go's own cgo on Windows only works with a gcc-compatible compiler,
 		// so the mock uses the same MinGW-w64 gcc that builds the binding.
-		// PE has no -fPIC.
+		// PE has no -fPIC; without -shared gcc links an executable and fails
+		// on the missing WinMain.
+		flags = append(flags, "-shared")
 	default:
 		flags = append(flags, "-fPIC", "-shared")
 	}

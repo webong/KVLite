@@ -395,14 +395,25 @@ jobs:
           done
           # Starting each binary proves it loads: a cgo-built executable that
           # cannot find a runtime DLL fails here instead of in a user's shell.
+          # The CLI prints its own usage and exits 0; the transports use Go's
+          # flag package, which prints usage and exits 2 for --help. Any other
+          # status means the process never started.
+          starts() {
+            local status=0
+            "$1" --help >/dev/null 2>&1 || status=$?
+            if [[ "$status" != 0 && "$status" != 2 ]]; then
+              echo "$1 did not start: --help exited $status" >&2
+              exit 1
+            fi
+          }
+          for driver in leveldb badgerdb boltdb lmdb; do
+            starts "$root/drivers/$driver/bin/kvlite.exe"
+          done
           for executable in \
             "$root/host/bin/kvlite.exe" \
             "$root/modules/http/bin/kvlite-http.exe" \
             "$root/modules/redis/bin/kvlite-redis.exe"; do
-            "$executable" --help >/dev/null
-          done
-          for driver in leveldb badgerdb boltdb lmdb; do
-            "$root/drivers/$driver/bin/kvlite.exe" --help >/dev/null
+            starts "$executable"
           done
       - name: Pack release tarballs
         run: |

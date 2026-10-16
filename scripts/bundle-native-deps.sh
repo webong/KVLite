@@ -143,10 +143,14 @@ unresolved_for_linux() {
 }
 
 dependencies_for_windows() {
+  # Native tools write CRLF into the pipe; a trailing CR would survive awk's
+  # field splitting and turn "KERNEL32.dll" into an unmatched "KERNEL32.dll\r"
+  # (reported as a missing dependency) and "libfoo.dll" into a name that
+  # resolves to no file on disk.
   if [[ "$dep_tool" == "dumpbin" ]]; then
-    dumpbin /dependents "$1" 2>/dev/null | awk '/\.dll/ { for (i = 1; i <= NF; i++) if ($i ~ /\.dll$/i) print $i }' | sort -u
+    dumpbin /dependents "$1" 2>/dev/null | tr -d '\r' | awk '/\.dll/ { for (i = 1; i <= NF; i++) if ($i ~ /\.dll$/i) print $i }' | sort -u
   else
-    objdump -p "$1" 2>/dev/null | awk '/DLL Name:/ { print $NF }' | sort -u
+    objdump -p "$1" 2>/dev/null | tr -d '\r' | awk '/DLL Name:/ { print $NF }' | sort -u
   fi
 }
 
