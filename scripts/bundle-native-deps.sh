@@ -148,7 +148,9 @@ dependencies_for_windows() {
   # (reported as a missing dependency) and "libfoo.dll" into a name that
   # resolves to no file on disk.
   if [[ "$dep_tool" == "dumpbin" ]]; then
-    dumpbin /dependents "$1" 2>/dev/null | tr -d '\r' | awk '/\.dll/ { for (i = 1; i <= NF; i++) if ($i ~ /\.dll$/i) print $i }' | sort -u
+    # tolower instead of the /i regex flag: mawk ignores that flag and matches
+    # nothing, which would silently skip every dependency.
+    dumpbin /dependents "$1" 2>/dev/null | tr -d '\r' | awk '/\.dll/ { for (i = 1; i <= NF; i++) if (tolower($i) ~ /\.dll$/) print $i }' | sort -u
   else
     objdump -p "$1" 2>/dev/null | tr -d '\r' | awk '/DLL Name:/ { print $NF }' | sort -u
   fi

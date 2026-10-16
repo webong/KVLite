@@ -17,9 +17,23 @@ import (
 	"time"
 )
 
+// tempDir is t.TempDir with a best-effort cleanup. The loader holds a loaded
+// library resident for the life of the process by design, and Windows refuses
+// to delete a mapped image, so removing a directory that held one may fail
+// there without any test being wrong.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "kvlite-native-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func buildMock(t *testing.T, extraFlags ...string) string {
 	t.Helper()
-	output := filepath.Join(t.TempDir(), libraryName())
+	output := filepath.Join(tempDir(t), libraryName())
 	flags := []string{}
 	switch runtime.GOOS {
 	case "darwin":
@@ -48,7 +62,7 @@ func buildMock(t *testing.T, extraFlags ...string) string {
 
 func TestNativeRoundTrip(t *testing.T) {
 	library := buildMock(t)
-	db, err := Open(filepath.Join(t.TempDir(), "db"), WithLibraryPath(library), WithDriver("leveldb"))
+	db, err := Open(filepath.Join(tempDir(t), "db"), WithLibraryPath(library), WithDriver("leveldb"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +121,7 @@ func TestNativeLibraryCompatibility(t *testing.T) {
 
 func TestCatalogDiscovery(t *testing.T) {
 	library := buildMock(t)
-	root := t.TempDir()
+	root := tempDir(t)
 	driverLibrary := filepath.Join(root, "drivers", "leveldb", "lib", libraryName())
 	if err := os.MkdirAll(filepath.Dir(driverLibrary), 0o755); err != nil {
 		t.Fatal(err)
@@ -141,7 +155,7 @@ func TestInstalledNativeLibrary(t *testing.T) {
 	if driver == "" {
 		driver = "leveldb"
 	}
-	db, err := Open(filepath.Join(t.TempDir(), "db"), WithLibraryPath(library), WithDriver(driver))
+	db, err := Open(filepath.Join(tempDir(t), "db"), WithLibraryPath(library), WithDriver(driver))
 	if err != nil {
 		t.Fatal(err)
 	}
