@@ -58,9 +58,9 @@ runtime) into the bundle, rewrites loader paths to it (`@loader_path`
 on macOS, `$ORIGIN` on Linux via patchelf, DLLs beside the binaries on
 Windows through application-directory-first lookup), re-signs Mach-O
 binaries, and checksums everything including `NOTICES/`. Linux needs
-`patchelf`; Windows needs `dumpbin` (MSVC) or `objdump` (MinGW) and still
-awaits runner proof. Verify the mechanism without native dependencies via
-`make test-bundle-runtime`.
+`patchelf`; Windows needs `dumpbin` (MSVC) or `objdump` (MinGW), which the
+`Windows runtime bundling` job exercises on a Windows runner. Verify the
+mechanism without native dependencies via `make test-bundle-runtime`.
 
 The on-disk `drivers/<driver>` bundle path is retained for compatibility with
 the first language-binding installers. It is a release-layout detail; all
