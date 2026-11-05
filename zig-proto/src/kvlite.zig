@@ -1113,6 +1113,161 @@ fn rawApplyExport(
 }
 
 // ---------------------------------------------------------------------------
+// Batched multi-get and multi-put for amortizing C ABI crossing overhead.
+// Each call to kvlite_raw_get crosses the C ABI boundary; multi_get allows
+// reading many keys in a single crossing, reducing per-operation overhead.
+// All results are owned by the caller and released with kvlite_free.
+
+const MultiGetResult = extern struct {
+    key: ?*const anyopaque,
+    key_length: usize,
+    value: ?*anyopaque,    // allocated by host; release with kvlite_free
+    value_length: usize,
+    status: c_int,         // KVLITE_OK, KVLITE_NOT_FOUND, or KVLITE_STORAGE_ERROR
+};
+
+const MultiPutEntry = extern struct {
+    key: ?*const anyopaque,
+    key_length: usize,
+    value: ?*const anyopaque,
+    value_length: usize,
+};
+
+fn rawMultiGetExport(
+    handle: u64,
+    results: ?*const MultiGetResult,
+    count: usize,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    const db = registryLookup(handle) orelse {
+        setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
+        return INVALID_ARGUMENT;
+    };
+    if (count == 0) return OK;
+    if (results == null) {
+        setError(out_error, "kvlite: invalid argument: results array is required", .{});
+        return INVALID_ARGUMENT;
+    }
+
+    var txn: ?*lmdb.Txn = null;
+    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, lmdb.RDONLY, &txn)) or txn == null) {
+        setError(out_error, "kvlite: LMDB: begin read transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+
+    const mut_ptr = @as(*MultiGetResult, @ptrCast(@constCast(results.?)));
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const addr = @intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult);
+        const r = @as(*MultiGetResult, @ptrFromInt(addr));
+        if (r.key_length == 0) {
+            // Skip validation for individual entries; mark as invalid
+            // (caller should validate before calling)
+            continue;
+        }
+        if (r.key == null) {
+            continue;
+        }
+        if (r.key_length > db.max_key_size) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: result[{d}] key too large", .{i});
+            return STORAGE_ERROR;
+        }
+
+        var key_val = lmdb.Val{ .mv_size = r.key_length, .mv_data = @constCast(@ptrCast(r.key.?)) };
+        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+        const rc = lmdb.mdb_get(txn.?, db.dbi, &key_val, &data_val);
+        if (lmdb.isError(rc)) {
+            if (rc == lmdb.NOTFOUND) {
+                r.status = NOT_FOUND;
+                continue;
+            }
+            lmdb.mdb_txn_abort(txn.?);
+            if (mapStatusFor(rc, out_error)) |status| return status;
+            setError(out_error, "kvlite: LMDB raw_multi_get: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+            return STORAGE_ERROR;
+        }
+
+        const payload_length = data_val.mv_size;
+        const block = mallocOrDie(@max(payload_length, 1));
+        if (payload_length > 0) {
+            @memcpy(block[0..payload_length], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..payload_length]);
+        }
+        r.value = @ptrCast(block);
+        r.value_length = payload_length;
+        r.status = OK;
+    }
+
+    lmdb.mdb_txn_abort(txn.?);
+    return OK;
+}
+
+fn rawMultiPutExport(
+    handle: u64,
+    entries: ?*const MultiPutEntry,
+    count: usize,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    const db = registryLookup(handle) orelse {
+        setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
+        return INVALID_ARGUMENT;
+    };
+    if (count == 0) return OK;
+    if (entries == null) {
+        setError(out_error, "kvlite: invalid argument: entries array is required", .{});
+        return INVALID_ARGUMENT;
+    }
+
+    var txn: ?*lmdb.Txn = null;
+    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, 0, &txn)) or txn == null) {
+        setError(out_error, "kvlite: LMDB: begin write transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+
+    const entry_ptr = @as(*const MultiPutEntry, @ptrCast(entries.?));
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const e = @as(*const MultiPutEntry, @ptrFromInt(@intFromPtr(entry_ptr) + i * @sizeOf(MultiPutEntry)));
+        if (e.key_length == 0) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: invalid argument: entry {d} has empty key", .{i});
+            return INVALID_ARGUMENT;
+        }
+        if (e.key == null) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: invalid argument: entry {d} has nil key pointer", .{i});
+            return INVALID_ARGUMENT;
+        }
+        if (e.value_length > 0 and e.value == null) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: invalid argument: entry {d} has nil value pointer", .{i});
+            return INVALID_ARGUMENT;
+        }
+        if (e.key_length > db.max_key_size) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: entry {d} key too large", .{i});
+            return STORAGE_ERROR;
+        }
+
+        var key_val = lmdb.Val{ .mv_size = e.key_length, .mv_data = @constCast(@ptrCast(e.key.?)) };
+        var val_val = lmdb.Val{ .mv_size = e.value_length, .mv_data = @constCast(@ptrCast(e.value)) };
+        const rc = lmdb.mdb_put(txn.?, db.dbi, &key_val, &val_val, 0);
+        if (lmdb.isError(rc)) {
+            lmdb.mdb_txn_abort(txn.?);
+            if (mapStatusFor(rc, out_error)) |status| return status;
+            setError(out_error, "kvlite: LMDB raw_multi_put: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+            return STORAGE_ERROR;
+        }
+    }
+
+    if (lmdb.isError(lmdb.mdb_txn_commit(txn.?))) {
+        setError(out_error, "kvlite: LMDB: commit write transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+    return OK;
+}
+
+// ---------------------------------------------------------------------------
 // Prefix scans over the raw engine keyspace.
 // Snapshot semantics: writes after scan_open are not visible.
 // Cursor must be released with kvlite_raw_scan_close.
@@ -1307,4 +1462,6 @@ comptime {
     @export(&rawScanOpenExport, .{ .name = "kvlite_raw_scan_open" });
     @export(&rawScanNextExport, .{ .name = "kvlite_raw_scan_next" });
     @export(&rawScanCloseExport, .{ .name = "kvlite_raw_scan_close" });
+    @export(&rawMultiGetExport, .{ .name = "kvlite_raw_multi_get" });
+    @export(&rawMultiPutExport, .{ .name = "kvlite_raw_multi_put" });
 }

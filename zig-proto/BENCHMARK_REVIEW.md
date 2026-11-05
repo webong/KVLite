@@ -96,4 +96,13 @@ bash scripts/build-driver-artifact.sh lmdb c-shared /tmp/libkvlite-go-lmdb-revie
 5. Measure the Go binding path through both hosts for apples-to-apples binding overhead
 6. Run on Linux for cross-platform comparison
 
+## New APIs added in this iteration
+
+| Symbol | Purpose |
+|--------|---------|
+| `kvlite_raw_multi_get` | Batch read multiple keys in one C ABI crossing |
+| `kvlite_raw_multi_put` | Batch write multiple key-values in one C ABI crossing |
+
+These batch APIs amortize C ABI crossing overhead for multi-key operations, reducing per-operation overhead when accessing multiple keys in sequence.
+
 The Go host remains the shipped implementation until a separate compatibility and release decision; ADR 0001 now records the decision to build Zig with production intent.
