@@ -1,5 +1,12 @@
 # ADR 0001 Zig Prototype — Benchmark Results & Recommendation
 
+> **Benchmark audit, 2026-11-05:** The original performance interpretation and
+> "do not port" recommendation below are superseded. The Go-binding call path
+> and ~4,670 puts/sec claim were mischaracterized. Read the corrected,
+> like-for-like [benchmark review](BENCHMARK_REVIEW.md) before using these
+> numbers to make a porting decision. The original data remains below for
+> provenance, not as a validated Go-versus-Zig conclusion.
+
 **Date:** 2026-11-05  
 **Platform:** macOS (Apple M3 Pro)  
 **Engine:** LMDB 0.9.35 (identical vendored source for both hosts)  
@@ -152,7 +159,7 @@ Both hosts correctly implement:
 
 ---
 
-## Recommendation
+## Original recommendation (superseded; see BENCHMARK_REVIEW.md)
 
 ### Do Not Port to Zig (Incremental or Otherwise)
 
@@ -248,4 +255,4 @@ gocore,del,1,4096,1000,3.412,293,3411.36,2989,22144
 ---
 
 **Prepared by:** ADR 0001 evaluation prototype  
-**Status:** Complete — no further action recommended
+**Status:** Original interpretation superseded by [BENCHMARK_REVIEW.md](BENCHMARK_REVIEW.md)
