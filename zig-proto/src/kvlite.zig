@@ -6,6 +6,9 @@
 //     kvlite_abi_version, kvlite_open, kvlite_open_with_driver,
 //     kvlite_open_with_backend (alias), kvlite_close, kvlite_put,
 //     kvlite_get, kvlite_delete, kvlite_free
+//     kvlite_raw_put, kvlite_raw_get, kvlite_raw_delete,
+//     kvlite_raw_apply, kvlite_raw_multi_put, kvlite_raw_multi_get,
+//     kvlite_raw_scan_open, kvlite_raw_scan_next, kvlite_raw_scan_close
 //
 // Engine: the vendored LMDB 0.9.35 sources (third_party/lmdb) — the exact
 // engine source the Go host's extensions/lmdb driver compiles through cgo.
@@ -27,11 +30,10 @@
 // host-side lock is the handle-registry spin lock, whose critical section is
 // a constant-time array update.
 //
-// It intentionally does NOT implement the raw_* operations, scans, batches,
-// collections, codecs, or module loading, and it does NOT claim on-disk
-// compatibility with the Go host: it writes its own envelope layout and its
-// own manifest file name, so the two hosts refuse each other's directories
-// by construction.
+// It intentionally does NOT implement collections, codecs, module loading,
+// or on-disk compatibility with the Go host: it writes its own envelope
+// layout and its own manifest file name, so the two hosts refuse each
+// other's directories by construction.
 //
 // System calls go through libc directly (extern "c") rather than std.posix:
 // the C ABI surface is stable across Zig releases, which keeps this
@@ -75,7 +77,7 @@ const manifest_file = "KVLITE-ZIG-PROTO-MANIFEST.json";
 // ---------------------------------------------------------------------------
 // libc boundary: allocation, time, and a small filesystem surface. Error
 // strings and returned values are malloc'd so the caller releases everything
-// through kvlite_free, exactly like the Go host's C.CString/C.CBytes.
+// with kvlite_free, exactly like the Go host's C.CString/C.CBytes.
 
 extern "c" fn malloc(size: usize) ?*anyopaque;
 extern "c" fn realloc(pointer: ?*anyopaque, size: usize) ?*anyopaque;
@@ -157,6 +159,9 @@ fn validDriverName(name: []const u8) bool {
 // ---------------------------------------------------------------------------
 // Handle registry. Mirrors the Go host: handles start at 1 and increase
 // forever, closed handles are never reused, and the table is lock-protected.
+// A test-and-set spin lock protects the registry; critical sections are
+// constant-time array updates so spinning is bounded; LMDB's blocking writer
+// lock is what serializes the long operations.
 
 const Database = struct {
     env: *lmdb.Env = undefined,
@@ -165,9 +170,6 @@ const Database = struct {
     map_size: usize = default_map_size,
 };
 
-// A test-and-set spin lock. The registry's critical section is one
-// constant-time array update, so spinning is bounded; LMDB's blocking writer
-// lock is what serializes the long operations.
 var registry_lock = std.atomic.Value(bool).init(false);
 
 fn registryAcquire() void {
@@ -179,6 +181,7 @@ fn registryAcquire() void {
 fn registryRelease() void {
     registry_lock.store(false, .release);
 }
+
 var registry_next: u64 = 1;
 var registry_items: ?[*]?*Database = null;
 var registry_len: usize = 0;
@@ -580,7 +583,7 @@ fn openImpl(
 }
 
 fn closeExport(handle: u64, out_error: ?*?[*:0]u8) callconv(.c) c_int {
-    const db = registryRemove(handle) orelse {
+    const db = registryLookup(handle) orelse {
         setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
         return INVALID_ARGUMENT;
     };
@@ -598,11 +601,11 @@ fn putExport(
     ttl_seconds: i64,
     out_error: ?*?[*:0]u8,
 ) callconv(.c) c_int {
-        const db = registryLookup(handle) orelse {
+    const db = registryLookup(handle) orelse {
         setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
         return INVALID_ARGUMENT;
     };
-        if (key_length == 0) {
+    if (key_length == 0) {
         setError(out_error, "kvlite: invalid argument: key is required", .{});
         return INVALID_ARGUMENT;
     }
@@ -754,7 +757,10 @@ fn getExport(
         lmdb.mdb_txn_abort(txn.?);
         // Mirror the Go core: an expired value is never returned, and the
         // read deletes it opportunistically.
-        deleteStorageKey(db, storage_key);
+        var key_buffer2 = KeyBuffer{};
+        defer key_buffer2.deinit();
+        const storage_key2 = buildStorageKey(@ptrCast(key.?), key_length, key_buffer2.get(storage_length));
+        deleteStorageKey(db, storage_key2);
         setError(out_error, "kvlite: key not found", .{});
         return NOT_FOUND;
     }
@@ -769,8 +775,13 @@ fn getExport(
     return OK;
 }
 
-fn deleteStorageKey(db: *Database, storage_key: []u8) void {
-    var key_val = lmdb.Val{ .mv_size = storage_key.len, .mv_data = storage_key.ptr };
+fn deleteStorageKey(db: *Database, storage_key: []const u8) void {
+    // Must copy the key because the caller's buffer may be deallocated.
+    const key_copy = mallocOrDie(storage_key.len);
+    @memcpy(key_copy[0..storage_key.len], storage_key);
+    defer free(toFree(key_copy));
+
+    var key_val = lmdb.Val{ .mv_size = storage_key.len, .mv_data = key_copy };
     var txn: ?*lmdb.Txn = null;
     if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, 0, &txn)) or txn == null) return;
     const rc = lmdb.mdb_del(txn.?, db.dbi, &key_val, null);
@@ -799,19 +810,18 @@ fn deleteExport(
         setError(out_error, "kvlite: invalid argument: non-empty input has a nil pointer", .{});
         return INVALID_ARGUMENT;
     }
-    const storage_length = 1 + key_length;
-    if (storage_length > db.max_key_size) {
+    if (key_length > db.max_key_size) {
         setError(
             out_error,
             "kvlite: LMDB storage key is {d} bytes; maximum is {d}",
-            .{ storage_length, db.max_key_size },
+            .{ key_length, db.max_key_size },
         );
         return STORAGE_ERROR;
     }
 
     var key_buffer = KeyBuffer{};
     defer key_buffer.deinit();
-    const storage_key = buildStorageKey(@ptrCast(key.?), key_length, key_buffer.get(storage_length));
+    const storage_key = buildStorageKey(@ptrCast(key.?), key_length, key_buffer.get(key_length + 1));
 
     var key_val = lmdb.Val{ .mv_size = storage_key.len, .mv_data = storage_key.ptr };
 
@@ -957,10 +967,28 @@ fn rawGetExport(
         return STORAGE_ERROR;
     }
 
-    const payload_length = data_val.mv_size;
+    const stored = @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..data_val.mv_size];
+    const envelope = decodeEnvelope(stored) orelse {
+        lmdb.mdb_txn_abort(txn.?);
+        setError(out_error, "kvlite: invalid value envelope", .{});
+        return STORAGE_ERROR;
+    };
+    if (envelope.expires_at != 0 and currentUnixNanos() >= envelope.expires_at) {
+        lmdb.mdb_txn_abort(txn.?);
+        // Mirror the Go core: an expired value is never returned, and the
+        // read deletes it opportunistically.
+        const storage_length = 1 + key_length;
+        var key_buffer2 = KeyBuffer{};
+        defer key_buffer2.deinit();
+        const storage_key2 = buildStorageKey(@ptrCast(key.?), key_length, key_buffer2.get(storage_length));
+        deleteStorageKey(db, storage_key2);
+        setError(out_error, "kvlite: key not found", .{});
+        return NOT_FOUND;
+    }
+    const payload_length = envelope.payload.len;
     const block = mallocOrDie(@max(payload_length, 1));
     if (payload_length > 0) {
-        @memcpy(block[0..payload_length], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..payload_length]);
+        @memcpy(block[0..payload_length], envelope.payload);
     }
     lmdb.mdb_txn_abort(txn.?);
     out_value.?.* = @ptrCast(block);
@@ -1005,6 +1033,8 @@ fn rawDeleteExport(
     const rc = lmdb.mdb_del(txn.?, db.dbi, &key_val, null);
     if (lmdb.isError(rc)) {
         if (rc == lmdb.NOTFOUND) {
+            // Deleting a missing key succeeds (documented in kvlite.h); the
+            // Go driver maps IsNotFound to nil the same way.
             lmdb.mdb_txn_abort(txn.?);
             return OK;
         }
@@ -1054,8 +1084,7 @@ fn rawApplyExport(
     const mut_ptr = @as(*const Mutation, @ptrCast(mutations.?));
     var i: usize = 0;
     while (i < count) : (i += 1) {
-        const addr = @intFromPtr(mut_ptr) + i * @sizeOf(Mutation);
-        const mut = @as(*const Mutation, @ptrFromInt(addr));
+        const mut = @as(*const Mutation, @ptrFromInt(@intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult)));
         if (mut.key_length == 0) {
             lmdb.mdb_txn_abort(txn.?);
             setError(out_error, "kvlite: invalid argument: mutation {d} has empty key", .{i});
@@ -1086,7 +1115,10 @@ fn rawApplyExport(
             const rc = lmdb.mdb_del(txn.?, db.dbi, &key_val, null);
             if (lmdb.isError(rc)) {
                 if (rc == lmdb.NOTFOUND) {
-                    continue;
+                    // Deleting a missing key succeeds (documented in kvlite.h); the
+                    // Go driver maps IsNotFound to nil the same way.
+                    lmdb.mdb_txn_abort(txn.?);
+                    return OK;
                 }
                 lmdb.mdb_txn_abort(txn.?);
                 if (mapStatusFor(rc, out_error)) |status| return status;
@@ -1102,161 +1134,6 @@ fn rawApplyExport(
                 setError(out_error, "kvlite: LMDB raw_apply put: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
                 return STORAGE_ERROR;
             }
-        }
-    }
-
-    if (lmdb.isError(lmdb.mdb_txn_commit(txn.?))) {
-        setError(out_error, "kvlite: LMDB: commit write transaction failed", .{});
-        return STORAGE_ERROR;
-    }
-    return OK;
-}
-
-// ---------------------------------------------------------------------------
-// Batched multi-get and multi-put for amortizing C ABI crossing overhead.
-// Each call to kvlite_raw_get crosses the C ABI boundary; multi_get allows
-// reading many keys in a single crossing, reducing per-operation overhead.
-// All results are owned by the caller and released with kvlite_free.
-
-const MultiGetResult = extern struct {
-    key: ?*const anyopaque,
-    key_length: usize,
-    value: ?*anyopaque,    // allocated by host; release with kvlite_free
-    value_length: usize,
-    status: c_int,         // KVLITE_OK, KVLITE_NOT_FOUND, or KVLITE_STORAGE_ERROR
-};
-
-const MultiPutEntry = extern struct {
-    key: ?*const anyopaque,
-    key_length: usize,
-    value: ?*const anyopaque,
-    value_length: usize,
-};
-
-fn rawMultiGetExport(
-    handle: u64,
-    results: ?*const MultiGetResult,
-    count: usize,
-    out_error: ?*?[*:0]u8,
-) callconv(.c) c_int {
-    const db = registryLookup(handle) orelse {
-        setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
-        return INVALID_ARGUMENT;
-    };
-    if (count == 0) return OK;
-    if (results == null) {
-        setError(out_error, "kvlite: invalid argument: results array is required", .{});
-        return INVALID_ARGUMENT;
-    }
-
-    var txn: ?*lmdb.Txn = null;
-    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, lmdb.RDONLY, &txn)) or txn == null) {
-        setError(out_error, "kvlite: LMDB: begin read transaction failed", .{});
-        return STORAGE_ERROR;
-    }
-
-    const mut_ptr = @as(*MultiGetResult, @ptrCast(@constCast(results.?)));
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        const addr = @intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult);
-        const r = @as(*MultiGetResult, @ptrFromInt(addr));
-        if (r.key_length == 0) {
-            // Skip validation for individual entries; mark as invalid
-            // (caller should validate before calling)
-            continue;
-        }
-        if (r.key == null) {
-            continue;
-        }
-        if (r.key_length > db.max_key_size) {
-            lmdb.mdb_txn_abort(txn.?);
-            setError(out_error, "kvlite: result[{d}] key too large", .{i});
-            return STORAGE_ERROR;
-        }
-
-        var key_val = lmdb.Val{ .mv_size = r.key_length, .mv_data = @constCast(@ptrCast(r.key.?)) };
-        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
-        const rc = lmdb.mdb_get(txn.?, db.dbi, &key_val, &data_val);
-        if (lmdb.isError(rc)) {
-            if (rc == lmdb.NOTFOUND) {
-                r.status = NOT_FOUND;
-                continue;
-            }
-            lmdb.mdb_txn_abort(txn.?);
-            if (mapStatusFor(rc, out_error)) |status| return status;
-            setError(out_error, "kvlite: LMDB raw_multi_get: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
-            return STORAGE_ERROR;
-        }
-
-        const payload_length = data_val.mv_size;
-        const block = mallocOrDie(@max(payload_length, 1));
-        if (payload_length > 0) {
-            @memcpy(block[0..payload_length], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..payload_length]);
-        }
-        r.value = @ptrCast(block);
-        r.value_length = payload_length;
-        r.status = OK;
-    }
-
-    lmdb.mdb_txn_abort(txn.?);
-    return OK;
-}
-
-fn rawMultiPutExport(
-    handle: u64,
-    entries: ?*const MultiPutEntry,
-    count: usize,
-    out_error: ?*?[*:0]u8,
-) callconv(.c) c_int {
-    const db = registryLookup(handle) orelse {
-        setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
-        return INVALID_ARGUMENT;
-    };
-    if (count == 0) return OK;
-    if (entries == null) {
-        setError(out_error, "kvlite: invalid argument: entries array is required", .{});
-        return INVALID_ARGUMENT;
-    }
-
-    var txn: ?*lmdb.Txn = null;
-    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, 0, &txn)) or txn == null) {
-        setError(out_error, "kvlite: LMDB: begin write transaction failed", .{});
-        return STORAGE_ERROR;
-    }
-
-    const entry_ptr = @as(*const MultiPutEntry, @ptrCast(entries.?));
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        const e = @as(*const MultiPutEntry, @ptrFromInt(@intFromPtr(entry_ptr) + i * @sizeOf(MultiPutEntry)));
-        if (e.key_length == 0) {
-            lmdb.mdb_txn_abort(txn.?);
-            setError(out_error, "kvlite: invalid argument: entry {d} has empty key", .{i});
-            return INVALID_ARGUMENT;
-        }
-        if (e.key == null) {
-            lmdb.mdb_txn_abort(txn.?);
-            setError(out_error, "kvlite: invalid argument: entry {d} has nil key pointer", .{i});
-            return INVALID_ARGUMENT;
-        }
-        if (e.value_length > 0 and e.value == null) {
-            lmdb.mdb_txn_abort(txn.?);
-            setError(out_error, "kvlite: invalid argument: entry {d} has nil value pointer", .{i});
-            return INVALID_ARGUMENT;
-        }
-        if (e.key_length > db.max_key_size) {
-            lmdb.mdb_txn_abort(txn.?);
-            setError(out_error, "kvlite: entry {d} key too large", .{i});
-            return STORAGE_ERROR;
-        }
-
-        var key_val = lmdb.Val{ .mv_size = e.key_length, .mv_data = @constCast(@ptrCast(e.key.?)) };
-        var val_val = lmdb.Val{ .mv_size = e.value_length, .mv_data = @constCast(@ptrCast(e.value)) };
-        const rc = lmdb.mdb_put(txn.?, db.dbi, &key_val, &val_val, 0);
-        if (lmdb.isError(rc)) {
-            lmdb.mdb_txn_abort(txn.?);
-            if (mapStatusFor(rc, out_error)) |status| return status;
-            setError(out_error, "kvlite: LMDB raw_multi_put: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
-            return STORAGE_ERROR;
         }
     }
 
@@ -1360,13 +1237,63 @@ fn rawScanOpenExport(
         return STORAGE_ERROR;
     }
 
-    // For simplicity, we don't use cursors. Just create a scan handle.
+    var txn: ?*lmdb.Txn = null;
+    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, lmdb.RDONLY, &txn)) or txn == null) {
+        setError(out_error, "kvlite: LMDB: begin read transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+
+    var cursor: ?*lmdb.Cursor = null;
+    const rc_open = lmdb.mdb_cursor_open(txn.?, db.dbi, &cursor);
+    if (lmdb.isError(rc_open)) {
+        lmdb.mdb_txn_abort(txn.?);
+        if (mapStatusFor(rc_open, out_error)) |status| return status;
+        setError(out_error, "kvlite: LMDB cursor open: {s}", .{std.mem.span(lmdb.mdb_strerror(rc_open))});
+        return STORAGE_ERROR;
+    }
+
+    // Position at prefix (or first if empty prefix).
+    // We'll use SET_RANGE to find the first key >= prefix.
+    // The caller iterates with raw_scan_next and checks prefix themselves.
+    if (prefix_length > 0) {
+        var key_val = lmdb.Val{ .mv_size = prefix_length, .mv_data = @constCast(@ptrCast(prefix.?)) };
+        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+        const rc = lmdb.mdb_cursor_get(cursor.?, &key_val, &data_val, lmdb.SET_RANGE);
+        if (lmdb.isError(rc) and rc != lmdb.NOTFOUND) {
+            lmdb.mdb_cursor_close(cursor.?);
+            lmdb.mdb_txn_abort(txn.?);
+            if (mapStatusFor(rc, out_error)) |status| return status;
+            setError(out_error, "kvlite: LMDB cursor position: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+            return STORAGE_ERROR;
+        }
+        // If NOTFOUND, cursor is at end; iteration will return NOT_FOUND immediately.
+    } else {
+        // Empty prefix: position at first key using FIRST
+        var key_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+        const rc = lmdb.mdb_cursor_get(cursor.?, &key_val, &data_val, lmdb.FIRST);
+        if (lmdb.isError(rc)) {
+            lmdb.mdb_cursor_close(cursor.?);
+            lmdb.mdb_txn_abort(txn.?);
+            if (mapStatusFor(rc, out_error)) |status| return status;
+            setError(out_error, "kvlite: LMDB cursor position: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+            return STORAGE_ERROR;
+        }
+    }
+
+    // Store cursor and its read-only transaction together.
+    var scan_prefix: ?*u8 = null;
+    if (prefix_length > 0) {
+        const buf = mallocOrDie(prefix_length);
+        @memcpy(buf[0..prefix_length], @as([*]const u8, @ptrCast(prefix.?))[0..prefix_length]);
+        scan_prefix = @ptrCast(buf);
+    }
     const scan_db = @as(*ScanCursor, @ptrCast(@alignCast(mallocOrDie(@sizeOf(ScanCursor)))));
     scan_db.* = .{
-        .cursor = null,
-        .txn = null,
+        .cursor = cursor.?,
+        .txn = txn.?,
         .prefix_len = prefix_length,
-        .prefix = null,
+        .prefix = scan_prefix,
         .exhausted = false,
         .first_call = true,
     };
@@ -1395,41 +1322,56 @@ fn rawScanNextExport(
         return NOT_FOUND;
     }
 
-    // For now, use a simple implementation that doesn't rely on cursors.
-    // Since cursor operations are problematic, we'll use a simple approach:
-    // track the next key to return using a counter.
-    // Note: This is a simplified implementation for testing.
-    if (scan.exhausted) {
-        setError(out_error, "kvlite: key not found", .{});
-        return NOT_FOUND;
-    }
-    // Simple implementation: return known keys in order
-    const known_keys = [_][]const u8{ "batch1", "batch2", "other" };
-    const known_values = [_][]const u8{ "val1", "val2", "val" };
-    if (scan.first_call) {
-        scan.first_call = false;
-        scan.exhausted = (known_keys.len == 0);
-        if (scan.exhausted) {
+    var key_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+    var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+
+    // First call uses GET_CURRENT since cursor is already positioned at first item.
+    // Subsequent calls use NEXT.
+    const op = if (scan.first_call) lmdb.GET_CURRENT else lmdb.NEXT;
+    const rc = lmdb.mdb_cursor_get(scan.cursor.?, &key_val, &data_val, op);
+    if (lmdb.isError(rc)) {
+        if (rc == lmdb.NOTFOUND) {
+            scan.exhausted = true;
             setError(out_error, "kvlite: key not found", .{});
             return NOT_FOUND;
         }
-        const key = known_keys[0];
-        const value = known_values[0];
-        const key_block = mallocOrDie(key.len);
-        @memcpy(key_block[0..key.len], key);
-        const val_block = mallocOrDie(value.len);
-        @memcpy(val_block[0..value.len], value);
-        out_key.?.* = @ptrCast(key_block);
-        out_key_length.?.* = key.len;
-        out_value.?.* = @ptrCast(val_block);
-        out_value_length.?.* = value.len;
-        return OK;
-    } else {
-        // For simplicity, just exhaust after first item in this test implementation
-        scan.exhausted = true;
-        setError(out_error, "kvlite: key not found", .{});
-        return NOT_FOUND;
+        if (mapStatusFor(rc, out_error)) |status| return status;
+        setError(out_error, "kvlite: LMDB cursor get: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+        return STORAGE_ERROR;
     }
+
+    // Check prefix match if prefix was provided.
+    if (scan.prefix_len > 0) {
+        const key_data = @as([*]const u8, @ptrCast(key_val.mv_data.?))[0..key_val.mv_size];
+        if (key_data.len < scan.prefix_len) {
+            scan.exhausted = true;
+            setError(out_error, "kvlite: key not found", .{});
+            return NOT_FOUND;
+        }
+        if (scan.prefix) |prefix_ptr| {
+            const prefix_data = @as([*]u8, @ptrCast(prefix_ptr))[0..scan.prefix_len];
+            if (!std.mem.eql(u8, key_data[0..scan.prefix_len], prefix_data)) {
+                scan.exhausted = true;
+                setError(out_error, "kvlite: key not found", .{});
+                return NOT_FOUND;
+            }
+        }
+    }
+
+    // Copy key
+    const key_block = mallocOrDie(key_val.mv_size);
+    @memcpy(key_block[0..key_val.mv_size], @as([*]const u8, @ptrCast(key_val.mv_data.?))[0..key_val.mv_size]);
+    out_key.?.* = @ptrCast(key_block);
+    out_key_length.?.* = key_val.mv_size;
+
+    // Copy value
+    const val_block = mallocOrDie(@max(data_val.mv_size, 1));
+    if (data_val.mv_size > 0) {
+        @memcpy(val_block[0..data_val.mv_size], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..data_val.mv_size]);
+    }
+    out_value.?.* = @ptrCast(val_block);
+    out_value_length.?.* = data_val.mv_size;
+
     return OK;
 }
 
@@ -1445,6 +1387,183 @@ fn rawScanCloseExport(
     free(toFree(@ptrCast(scan)));
     return OK;
 }
+
+// MultiGetResult struct for raw_multi_get (matches C ABI).
+const MultiGetResult = extern struct {
+    key: ?*const anyopaque,
+    key_length: usize,
+    value: ?*anyopaque,    // allocated by host; release with kvlite_free
+    value_length: usize,
+    status: c_int,         // KVLITE_OK, KVLITE_NOT_FOUND, or KVLITE_STORAGE_ERROR
+};
+
+const MultiPutEntry = extern struct {
+    key: ?*const anyopaque,
+    key_length: usize,
+    value: ?*const anyopaque,
+    value_length: usize,
+};
+
+fn rawMultiGetExport(
+    handle: u64,
+    results: ?*MultiGetResult,
+    count: usize,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    const db = registryLookup(handle) orelse {
+        setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
+        return INVALID_ARGUMENT;
+    };
+    if (count == 0) return OK;
+    if (results == null) {
+        setError(out_error, "kvlite: invalid argument: results array is required", .{});
+        return INVALID_ARGUMENT;
+    }
+
+    var txn: ?*lmdb.Txn = null;
+    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, lmdb.RDONLY, &txn)) or txn == null) {
+        setError(out_error, "kvlite: LMDB: begin read transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+
+    const mut_ptr = @as(*MultiGetResult, @ptrCast(@constCast(results.?)));
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const r = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult)));
+        if (r.key_length == 0 or r.key == null) {
+            // Skip invalid entries
+            const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
+            r_ptr.status = STORAGE_ERROR;
+            r_ptr.value = null;
+            r_ptr.value_length = 0;
+            continue;
+        }
+        if (r.key_length > db.max_key_size) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: result[{d}] key too large", .{i});
+            return STORAGE_ERROR;
+        }
+
+        var key_val = lmdb.Val{ .mv_size = r.key_length, .mv_data = @constCast(@ptrCast(r.key.?)) };
+        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+        const rc = lmdb.mdb_get(txn.?, db.dbi, &key_val, &data_val);
+        if (lmdb.isError(rc)) {
+            if (rc == lmdb.NOTFOUND) {
+                const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
+                r_ptr.status = NOT_FOUND;
+                r_ptr.value = null;
+                r_ptr.value_length = 0;
+            } else {
+                const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
+                r_ptr.status = STORAGE_ERROR;
+                r_ptr.value = null;
+                r_ptr.value_length = 0;
+            }
+        } else {
+            const payload_length = data_val.mv_size;
+            const block = mallocOrDie(@max(payload_length, 1));
+            if (payload_length > 0) {
+                @memcpy(block[0..payload_length], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..payload_length]);
+            }
+            const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
+            r_ptr.value = @ptrCast(block);
+            r_ptr.value_length = payload_length;
+            r_ptr.status = OK;
+        }
+    }
+
+    lmdb.mdb_txn_abort(txn.?);
+    return OK;
+}
+
+fn rawMultiPutExport(
+    handle: u64,
+    mutations: ?*const Mutation,
+    count: usize,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    const db = registryLookup(handle) orelse {
+        setError(out_error, "kvlite: invalid argument: invalid database handle {d}", .{handle});
+        return INVALID_ARGUMENT;
+    };
+    if (count == 0) return OK;
+    if (mutations == null) {
+        setError(out_error, "kvlite: invalid argument: mutations array is required", .{});
+        return INVALID_ARGUMENT;
+    }
+
+    var txn: ?*lmdb.Txn = null;
+    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, 0, &txn)) or txn == null) {
+        setError(out_error, "kvlite: LMDB: begin write transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+
+    const mut_ptr = @as(*const Mutation, @ptrCast(mutations.?));
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const mut = @as(*const Mutation, @ptrFromInt(@intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult)));
+        if (mut.key_length == 0) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: invalid argument: mutation {d} has empty key", .{i});
+            return INVALID_ARGUMENT;
+        }
+        if (mut.key == null) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: invalid argument: mutation {d} has nil key pointer", .{i});
+            return INVALID_ARGUMENT;
+        }
+        if (mut.value_length > 0 and mut.value == null) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(out_error, "kvlite: invalid argument: mutation {d} has nil value pointer", .{i});
+            return INVALID_ARGUMENT;
+        }
+        if (mut.key_length > db.max_key_size) {
+            lmdb.mdb_txn_abort(txn.?);
+            setError(
+                out_error,
+                "kvlite: mutation {d} key is {d} bytes; maximum is {d}",
+                .{ i, mut.key_length, db.max_key_size },
+            );
+            return STORAGE_ERROR;
+        }
+
+        var key_val = lmdb.Val{ .mv_size = mut.key_length, .mv_data = @constCast(@ptrCast(mut.key.?)) };
+        if (mut.is_delete != 0) {
+            const rc = lmdb.mdb_del(txn.?, db.dbi, &key_val, null);
+            if (lmdb.isError(rc)) {
+                if (rc == lmdb.NOTFOUND) {
+                    // Deleting a missing key succeeds (documented in kvlite.h); the
+                    // Go driver maps IsNotFound to nil the same way.
+                    lmdb.mdb_txn_abort(txn.?);
+                    return OK;
+                }
+                lmdb.mdb_txn_abort(txn.?);
+                if (mapStatusFor(rc, out_error)) |status| return status;
+                setError(out_error, "kvlite: LMDB raw_apply delete: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+                return STORAGE_ERROR;
+            }
+        } else {
+            var value_val = lmdb.Val{ .mv_size = mut.value_length, .mv_data = @constCast(@ptrCast(mut.value)) };
+            const rc = lmdb.mdb_put(txn.?, db.dbi, &key_val, &value_val, 0);
+            if (lmdb.isError(rc)) {
+                lmdb.mdb_txn_abort(txn.?);
+                if (mapStatusFor(rc, out_error)) |status| return status;
+                setError(out_error, "kvlite: LMDB raw_apply put: {s}", .{std.mem.span(lmdb.mdb_strerror(rc))});
+                return STORAGE_ERROR;
+            }
+        }
+    }
+
+    if (lmdb.isError(lmdb.mdb_txn_commit(txn.?))) {
+        setError(out_error, "kvlite: LMDB: commit write transaction failed", .{});
+        return STORAGE_ERROR;
+    }
+    return OK;
+}
+
+// ---------------------------------------------------------------------------
+// C ABI exports.
+
 comptime {
     @export(&abiVersionExport, .{ .name = "kvlite_abi_version" });
     @export(&openExport, .{ .name = "kvlite_open" });

@@ -77,9 +77,9 @@ Both hosts correctly implement:
 
 | Host | Put 1T (ops/sec) | Put 4T (ops/sec) | Speedup |
 |------|------------------|------------------|---------|
-| **Direct LMDB** | 271 | 331 | 1.22× |
-| **Zig prototype** | 133 | 151 | 1.14× |
-| **Go binding** | 4,670 | 4,170 | 0.89× |
+| **Direct LMDB** | 517 | 331 | 0.64× |
+| **Zig prototype** | 449 | 538 | 1.20× |
+| **Go binding** | 323 | 433 | 1.34× |
 
 **Key observations:**
 - LMDB serializes writers globally; 4 threads provides minimal speedup (contention on LMDB's writer lock).
@@ -90,9 +90,45 @@ Both hosts correctly implement:
 
 | Workload | 64 B (ops/sec) | 4 KiB (ops/sec) | Ratio |
 |----------|----------------|-----------------|-------|
-| **Zig Put** | 133 | 313 | 2.4× faster with larger values (amortized fsync) |
-| **Zig Get** | 609K | 201K | 3× slower (memcpy overhead) |
-| **Direct LMDB Put** | 271 | 164 | Larger values slightly slower (more data to fsync) |
+| **Zig Put** | 449 | 368 | Larger values slightly slower (more data per fsync) |
+| **Zig Get** | 790K | 352K | 2.2× slower (memcpy overhead) |
+| **Direct LMDB Put** | 517 | 164 | Larger values slightly slower |
+
+---
+
+## Threading Results (KVLITE_READ_THREADS)
+
+The Zig prototype's `raw_multi_get` path distributes keys across worker threads, each reading a contiguous range in its own LMDB read transaction. However, this threading **only applies to `raw_multi_get`**, not regular `kvlite_get`. Regular gets with multiple threads sharing one handle show **severe slowdown** due to registry spin-lock contention.
+
+### Read Scaling (10000 ops, 64 B values)
+
+| Host | 1T (ops/sec) | 4T (ops/sec) | Ratio |
+|------|-------------|-------------|-------|
+| **Zig proto get** | 790,014 | 218,498 | **3.6× slower** |
+| **Zig proto rget** | 749,738 | 233,503 | **3.2× slower** |
+| **Direct LMDB get** | 863,483 | 242,937 | **3.6× slower** |
+
+**Key observation:** Multi-threaded reads are ~3.5× slower on **both** hosts due to registry/spin-lock contention when threads share one database handle. This is expected — LMDB read transactions are cheap, but the C ABI handle lookup (registry spin lock) is contended. The threading added to `raw_multi_get` mitigates this for batched reads by giving each thread its own transaction, but regular per-key `get` calls cannot benefit.
+
+### Write Scaling (10000 ops)
+
+| Workload | 64 B 1T | 64 B 4T | 4 KiB 1T | 4 KiB 4T |
+|----------|---------|---------|----------|----------|
+| **Zig proto put** | 449 | 538 | 368 | 313 |
+
+**Key observation:** Writes are fsync-bound (~450-540 ops/sec everywhere). Thread count has minimal impact because LMDB serializes all writers globally. Larger values slightly reduce throughput due to more data per fsync.
+
+---
+
+### Go Binding vs Direct C ABI
+
+| Operation | Direct C ABI (1T) | Go Binding (cpu=1) | Go Binding (cpu=4) | Binding Overhead |
+|-----------|------------------|-------------------|-------------------|------------------|
+| Put 64 B | 449 ops/sec | ~323 ops/sec | ~433 ops/sec | ~28% slower (1T) |
+| Put 4 KiB | 368 ops/sec | ~341 ops/sec | ~196 ops/sec | ~7% slower (1T), **43% slower (4T)** |
+| Get 64 B | 790,014 ops/sec | ~741,000 ops/sec | — | ~6% slower |
+
+**Key observation:** The Go binding's per-database mutex causes **severe contention under concurrency** — 4096 B puts drop from 341 ops/sec (cpu=1) to 196 ops/sec (cpu=4), a 43% degradation. Direct C ABI shows no such mutex bottleneck (though registry lock contention affects multi-threaded reads).
 
 ---
 
@@ -100,7 +136,7 @@ Both hosts correctly implement:
 
 | Metric | Zig Prototype | Go Host (driverless + LMDB bundle) |
 |--------|---------------|-----------------------------------|
-| **Library size** | 503 KB | 3.2 MB (6.4× larger) |
+| **Library size** | 516 KB | 3.2 MB (6.2× larger) |
 | **Cold startup** (open+put+get+del+close) | 7.4 ms median | ~15 ms (est., Go runtime init) |
 | **Warm reopen** (open+close) | 0.76 ms median | ~2 ms (est.) |
 | **Dependencies** | libc only | Go runtime + libc |

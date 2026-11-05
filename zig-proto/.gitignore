@@ -1,3 +1,6 @@
 .zig-cache/
 zig-out/
 bin/
+kvlite/
+bench/cbench
+bench/lmbench
