@@ -46,6 +46,37 @@ pub extern fn mdb_get(txn: *Txn, dbi: DBI, key: *Val, data: *Val) c_int;
 pub extern fn mdb_put(txn: *Txn, dbi: DBI, key: *Val, data: *Val, flags: c_uint) c_int;
 pub extern fn mdb_del(txn: *Txn, dbi: DBI, key: *Val, data: ?*Val) c_int;
 
+// Cursor operations.
+pub const Cursor = opaque {};
+
+pub extern fn mdb_cursor_open(txn: *Txn, dbi: DBI, cursor: *?*Cursor) c_int;
+pub extern fn mdb_cursor_close(cursor: *Cursor) void;
+pub extern fn mdb_cursor_get(cursor: *Cursor, key: *Val, data: *Val, op: c_uint) c_int;
+pub extern fn mdb_cursor_put(cursor: *Cursor, key: *Val, data: *Val, flags: c_uint) c_int;
+pub extern fn mdb_cursor_del(cursor: *Cursor, flags: c_uint) c_int;
+pub extern fn mdb_cursor_count(cursor: *Cursor, count: *usize) c_int;
+
+// Cursor operations.
+pub const FIRST: c_uint = 0x40000000;
+pub const FIRST_DUP: c_uint = 0x02;
+pub const GET_BOTH: c_uint = 0x03;
+pub const GET_BOTH_RANGE: c_uint = 0x04;
+pub const GET_CURRENT: c_uint = 0x05;
+pub const GET_MULTIPLE: c_uint = 0x06;
+pub const LAST: c_uint = 0x40000001;
+pub const LAST_DUP: c_uint = 0x07;
+pub const NEXT: c_uint = 0x08;
+pub const NEXT_DUP: c_uint = 0x09;
+pub const NEXT_MULTIPLE: c_uint = 0x0A;
+pub const NEXT_NODUP: c_uint = 0x0B;
+pub const PREV: c_uint = 0x0C;
+pub const PREV_DUP: c_uint = 0x0D;
+pub const PREV_MULTIPLE: c_uint = 0x0E;
+pub const PREV_NODUP: c_uint = 0x0F;
+pub const SET: c_uint = 0x10;
+pub const SET_KEY: c_uint = 0x11;
+pub const SET_RANGE: c_uint = 0x12;
+
 pub extern fn mdb_strerror(rc: c_int) [*:0]const u8;
 
 pub fn isError(rc: c_int) bool {

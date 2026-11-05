@@ -1,7 +1,7 @@
 # Zig prototype benchmark review
 
 **Date:** 2026-11-05
-**Status:** Preliminary; no runtime migration decision
+**Status:** Preliminary measurements; Zig runtime development continues
 
 The first `RESULTS.md` report concluded that Go was decisively faster and that the Zig port should stop. That conclusion is not supported by a like-for-like comparison. In particular, the public Go binding calls `C.bridge_put`/`C.bridge_get` in `native_dynamic.go`; it does not bypass the C ABI. The reported ~4,670 Go-binding puts/sec has no corresponding raw row in that report, and its estimated nanosecond cost breakdowns were not measured. Direct Go-core, direct LMDB, Go-binding, and Zig-host numbers exercise different paths and cannot be attributed solely to implementation language.
 
@@ -29,4 +29,4 @@ bash scripts/build-driver-artifact.sh lmdb c-shared "$review_dir/libkvlite.dylib
 
 ## Decision
 
-**Continue the Zig prototype, but do not begin a full port yet.** Its smaller library and faster cached-read result are worth investigating. The next milestone is repeatable paired measurements across read, write, mixed, concurrent, and larger-value workloads, on more than one platform, with equivalent durability and increasingly matched KVLite semantics. Include the same language-binding path on both hosts, record raw output and build flags, and distinguish engine, host, and binding costs. Only then decide whether an incremental port earns its maintenance and compatibility cost. Until that decision, the Go host remains the production implementation and the ADR remains proposed.
+**Continue building Zig as a production-quality runtime candidate; do not release or switch production to it yet.** Its smaller library and faster cached-read result merit further work, but performance is only one part of readiness. The next milestone is to close a meaningful slice of the missing KVLite semantics with conformance tests, then run repeatable paired measurements across read, write, mixed, concurrent, and larger-value workloads on more than one platform. Include the same language-binding path on both hosts, record raw output and build flags, and distinguish engine, host, and binding costs. The Go host remains the shipped implementation until a separate compatibility and release decision; ADR 0001 now records the decision to build Zig with production intent.

@@ -1,7 +1,10 @@
-# Zig Prototype — Build & Run
+# Zig runtime candidate — Build & Run
 
-Non-production ADR 0001 Zig host implementing the C ABI v1 subset behind
-`capi/kvlite.h` using the same vendored LMDB 0.9.35 as the Go host.
+This is the first slice of a production-quality Zig runtime candidate under
+[ADR 0001](../docs/adr/0001-evaluate-zig-embedded-runtime.md). It currently
+implements only a C ABI v1 subset behind `capi/kvlite.h` with vendored LMDB
+0.9.35. Build and test it to production standards, but do not deploy or release
+it as a complete KVLite host yet.
 
 ## Prerequisites
 
@@ -111,7 +114,8 @@ conformance,total=36,passed=36,result=PASS
 
 ## Results
 
-See `RESULTS.md` for full analysis and raw CSV data.
+See [BENCHMARK_REVIEW.md](BENCHMARK_REVIEW.md) for the corrected interpretation;
+`RESULTS.md` retains the original measurements and superseded analysis.
 
 ## Notes
 
@@ -119,3 +123,4 @@ See `RESULTS.md` for full analysis and raw CSV data.
 - Writes its own manifest file (`KVLITE-ZIG-PROTO-MANIFEST.json`) to prevent accidental interop with Go host databases
 - Does NOT implement raw_* ops, scans, batches, collections, codecs, or module loading
 - Does NOT claim on-disk compatibility with Go host
+- These are gaps to close toward a production-ready Zig host, not permanent scope exclusions
