@@ -42,6 +42,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const lmdb = @import("lmdb.zig");
+const ext = @import("ext_io");
 
 // Debug: libc printf for tracing
 pub extern "c" fn printf(format: [*:0]const u8, ...) c_int;
@@ -220,6 +221,87 @@ fn registryRemove(handle: u64) ?*Database {
     const db = registry_items.?[handle - 1];
     if (db != null) registry_items.?[handle - 1] = null;
     return db;
+}
+
+// ---------------------------------------------------------------------------
+// Ext plugin host registry (ext_io, github.com/webong/ext/pkg/ext-zig).
+//
+// KVLite loads plugins through ext's host infrastructure: a plugin is a C
+// shared library exporting the ext_plugin.h ABI (open/call/close), loaded
+// via ext.host.CShared and called through ext.host.Session. The KVLite
+// wire protocol rides inside ext_plugin_call's JSON request/response.
+//
+// Plugin wire protocol (JSON, inside ext_plugin_call):
+//
+//   Request:  {"contract":{"name":"kvlite.kv","version":"v1"},"operation":"get","payload":{"key":"base64","collection":"users"}}
+//   Response: {"value":"base64","found":true}  or  {"error":{"code":"not_found","message":"..."}}
+//
+// Operations: get, put, delete, scan, multi_get, multi_put, health
+//
+// KVLite keeps its own C ABI contract (capi/kvlite.h) as the public surface.
+// ext is the plugin *loading* layer: callers open a KVLite directory with
+// kvlite_open*, then optionally load plugins with kvlite_plugin_load* and
+// call into them with kvlite_plugin_call*.
+
+var plugin_registry_lock = std.atomic.Value(bool).init(false);
+
+fn pluginRegistryAcquire() void {
+    while (plugin_registry_lock.swap(true, .acquire)) {
+        std.atomic.spinLoopHint();
+    }
+}
+
+fn pluginRegistryRelease() void {
+    plugin_registry_lock.store(false, .release);
+}
+
+var plugin_registry_next: u64 = 1;
+var plugin_registry_items: ?[*]?*PluginSession = null;
+var plugin_registry_len: usize = 0;
+var plugin_registry_cap: usize = 0;
+
+// A loaded ext plugin: dlopen'd library (kept resident) plus the ext host
+// session used to call into it.
+const PluginSession = struct {
+    library: ext.host.CShared,
+    session: ext.host.Session,
+};
+fn pluginRegistryInsert(ps: *PluginSession) u64 {
+    pluginRegistryAcquire();
+    defer pluginRegistryRelease();
+    const handle = plugin_registry_next;
+    const slot = handle - 1;
+    if (slot >= plugin_registry_cap) {
+        const new_cap: usize = if (plugin_registry_cap == 0) 16 else plugin_registry_cap * 2;
+        const byte_size = new_cap * @sizeOf(?*PluginSession);
+        const block = realloc(@ptrCast(plugin_registry_items), byte_size) orelse
+            @panic("kvlite-zig-proto: out of memory growing the plugin handle table");
+        plugin_registry_items = @as([*]?*PluginSession, @ptrCast(@alignCast(block)));
+        plugin_registry_cap = new_cap;
+    }
+    plugin_registry_items.?[slot] = ps;
+    plugin_registry_next += 1;
+    if (handle > plugin_registry_len) plugin_registry_len = @as(usize, @intCast(handle));
+    return handle;
+}
+
+fn pluginRegistryLookup(handle: u64) ?*PluginSession {
+    pluginRegistryAcquire();
+    defer pluginRegistryRelease();
+    if (handle == 0 or handle > plugin_registry_len) return null;
+    return plugin_registry_items.?[handle - 1];
+}
+
+fn pluginRegistryRemove(handle: u64) void {
+    pluginRegistryAcquire();
+    defer pluginRegistryRelease();
+    if (handle == 0 or handle > plugin_registry_len) return;
+    const ps = plugin_registry_items.?[handle - 1];
+    if (ps != null) {
+        plugin_registry_items.?[handle - 1] = null;
+        ps.?.session.deinit();
+        std.heap.page_allocator.destroy(ps.?);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1562,6 +1644,178 @@ fn rawMultiPutExport(
 }
 
 // ---------------------------------------------------------------------------
+// Ext plugin host (ext_io, github.com/webong/ext/pkg/ext-zig).
+//
+// KVLite loads plugins through ext's host infrastructure. A plugin is a C
+// shared library exporting the ext_plugin.h ABI (open/call/close), loaded
+// via ext.host.CShared and called through ext.host.Session. The KVLite
+// wire protocol rides inside ext_plugin_call's JSON request/response:
+//
+//   Request:  {"operation":"get","payload":{"key":"base64","collection":"users"}}
+//   Response: {"value":"base64","found":true}  or  {"error":{"code":"not_found","message":"..."}}
+//
+// Operations: get, put, delete, scan, multi_get, multi_put, health
+//
+// KVLite keeps its own C ABI contract (capi/kvlite.h) as the public surface.
+// ext is the plugin loading layer: callers open a KVLite directory with
+// kvlite_open*, then optionally load plugins with kvlite_plugin_load* and
+// call into them with kvlite_plugin_call*.
+
+const kv_plugin_contract = ext.wire.Ref{
+    .name = "kvlite.kv",
+    .version = "v1",
+};
+
+// Response types for plugin calls, encoded via ext.wire.encode.
+const PluginErrorBody = struct {
+    code: []const u8,
+    message: []const u8,
+};
+const PluginErrorResponse = struct {
+    err: PluginErrorBody,
+};
+
+fn pluginLoadExport(
+    path: ?[*:0]const u8,
+    out_handle: ?*u64,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    if (path == null or out_handle == null) {
+        setError(out_error, "kvlite: invalid argument: path and out_handle are required", .{});
+        return INVALID_ARGUMENT;
+    }
+    const path_slice = std.mem.span(path.?);
+
+    const library = ext.host.CShared.open(path_slice) catch |err| {
+        setError(out_error, "kvlite: plugin load failed: {s}", .{@errorName(err)});
+        return STORAGE_ERROR;
+    };
+
+    const ps = std.heap.page_allocator.create(PluginSession) catch |err| {
+        setError(out_error, "kvlite: out of memory allocating plugin session: {s}", .{@errorName(err)});
+        return STORAGE_ERROR;
+    };
+    ps.* = .{ .library = library, .session = undefined };
+
+    const session = ext.host.Session.open(
+        std.heap.page_allocator,
+        .{
+            .identity = .{ .id = "kvlite.plugin", .revision = "v1" },
+            .contracts = &.{
+                .{ .name = "kvlite.kv", .version = "v1", .operations = &.{
+                    .{ .name = "get", .surface = "observation" },
+                    .{ .name = "put", .surface = "mutation" },
+                    .{ .name = "delete", .surface = "mutation" },
+                    .{ .name = "scan", .surface = "observation" },
+                    .{ .name = "multi_get", .surface = "observation" },
+                    .{ .name = "multi_put", .surface = "mutation" },
+                    .{ .name = "health", .surface = "observation" },
+                }},
+            },
+        },
+        pluginVerify,
+        .{ .context = @ptrCast(@alignCast(ps)), .connect = pluginConnect },
+        pluginAuthorize,
+    ) catch |err| {
+        std.heap.page_allocator.destroy(ps);
+        setError(out_error, "kvlite: plugin handshake failed: {s}", .{@errorName(err)});
+        return STORAGE_ERROR;
+    };
+    ps.session = session;
+
+    const handle = pluginRegistryInsert(ps);
+    out_handle.?.* = handle;
+    return OK;
+}
+
+fn pluginConnect(ctx: *anyopaque) !ext.host.Backend {
+    const self: *PluginSession = @ptrCast(@alignCast(ctx));
+    return self.library.backend();
+}
+
+fn pluginVerify(d: ext.wire.Descriptor) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    try ext.wire.validate(arena.allocator(), d);
+}
+
+fn pluginAuthorize(_: ext.wire.Request) !void {}
+
+fn pluginCallExport(
+    handle: u64,
+    operation: ?[*:0]const u8,
+    request: ?[*:0]const u8,
+    out_response: ?*[*:0]u8,
+    out_response_length: ?*usize,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    const ps = pluginRegistryLookup(handle) orelse {
+        setError(out_error, "kvlite: invalid argument: invalid plugin handle {d}", .{handle});
+        return INVALID_ARGUMENT;
+    };
+    if (operation == null or request == null or out_response == null or out_response_length == null) {
+        setError(out_error, "kvlite: invalid argument: operation, request, out_response, and out_response_length are required", .{});
+        return INVALID_ARGUMENT;
+    }
+    const op = std.mem.span(operation.?);
+    const request_json = std.mem.span(request.?);
+
+    const payload = ext.wire.decode(std.heap.page_allocator, request_json) catch |err| {
+        setError(out_error, "kvlite: invalid request JSON: {s}", .{@errorName(err)});
+        return INVALID_ARGUMENT;
+    };
+
+    const result = ps.session.callRaw(
+        std.heap.page_allocator,
+        kv_plugin_contract,
+        op,
+        payload,
+        5_000_000_000, // 5 second timeout
+    ) catch |err| {
+        setError(out_error, "kvlite: plugin call failed: {s}", .{@errorName(err)});
+        return STORAGE_ERROR;
+    };
+
+    const response_json = switch (result) {
+        .remote => |e| blk: {
+            const err_resp = PluginErrorResponse{ .err = .{ .code = e.code, .message = e.message } };
+            break :blk ext.wire.encode(std.heap.page_allocator, err_resp) catch |enc_err| {
+                setError(out_error, "kvlite: failed to encode remote error: {s}", .{@errorName(enc_err)});
+                return STORAGE_ERROR;
+            };
+        },
+        .value => |v| blk: {
+            break :blk ext.wire.encode(std.heap.page_allocator, v) catch |enc_err| {
+                setError(out_error, "kvlite: failed to encode response: {s}", .{@errorName(enc_err)});
+                return STORAGE_ERROR;
+            };
+        },
+    };
+
+    const block = mallocOrDie(@max(response_json.len, 1));
+    @memcpy(block[0..response_json.len], response_json);
+    if (out_response) |resp_ptr| {
+        const resp_slot: *[*:0]u8 = @alignCast(@ptrCast(resp_ptr));
+        resp_slot.* = @alignCast(@ptrCast(block));
+    }
+    out_response_length.?.* = response_json.len;
+    return OK;
+}
+
+fn pluginCloseExport(
+    handle: u64,
+    out_error: ?*?[*:0]u8,
+) callconv(.c) c_int {
+    const ps = pluginRegistryLookup(handle) orelse {
+        setError(out_error, "kvlite: invalid argument: invalid plugin handle {d}", .{handle});
+        return INVALID_ARGUMENT;
+    };
+    pluginRegistryRemove(handle);
+    _ = ps;
+    return OK;
+}
+
+// ---------------------------------------------------------------------------
 // C ABI exports.
 
 comptime {
@@ -1583,4 +1837,7 @@ comptime {
     @export(&rawScanCloseExport, .{ .name = "kvlite_raw_scan_close" });
     @export(&rawMultiGetExport, .{ .name = "kvlite_raw_multi_get" });
     @export(&rawMultiPutExport, .{ .name = "kvlite_raw_multi_put" });
+    @export(&pluginLoadExport, .{ .name = "kvlite_plugin_load" });
+    @export(&pluginCallExport, .{ .name = "kvlite_plugin_call" });
+    @export(&pluginCloseExport, .{ .name = "kvlite_plugin_close" });
 }

@@ -34,6 +34,51 @@ The library exports the ABI v1 subset:
 kvlite_abi_version  kvlite_open  kvlite_open_with_driver
 kvlite_open_with_backend  kvlite_close  kvlite_put
 kvlite_get  kvlite_delete  kvlite_free
+kvlite_raw_put  kvlite_raw_get  kvlite_raw_delete
+kvlite_raw_apply  kvlite_raw_multi_put  kvlite_raw_multi_get
+kvlite_raw_scan_open  kvlite_raw_scan_next  kvlite_raw_scan_close
+kvlite_plugin_load  kvlite_plugin_call  kvlite_plugin_close
+```
+
+## Ext Plugin System
+
+KVLite loads plugins through [ext](https://github.com/webong/ext)'s host
+infrastructure (`github.com/webong/ext/pkg/ext-zig`, released as `ext-zig-v0.2.0`).
+A plugin is a C shared library exporting the [ext C ABI](lib/plugin/include/ext_plugin.h)
+(`ext_plugin_abi_version`, `ext_plugin_open`, `ext_plugin_call`, `ext_plugin_close`).
+KVLite loads it via `ext.host.CShared` and calls into it through `ext.host.Session`.
+
+KVLite's wire protocol rides inside `ext_plugin_call`'s JSON request/response:
+
+```
+Request:  {"operation":"get","payload":{"key":"base64","collection":"users"}}
+Response: {"value":"base64","found":true}
+          or {"error":{"code":"not_found","message":"..."}}
+```
+
+Operations: `get`, `put`, `delete`, `scan`, `multi_get`, `multi_put`, `health`.
+
+KVLite keeps its own C ABI contract (`capi/kvlite.h`) as the public surface.
+ext is the plugin *loading* layer.
+
+### Build an Example Plugin
+
+```bash
+# Minimal example plugin (in-memory KV store)
+gcc -dynamiclib -o test_plugin.dylib test_plugin.c
+```
+
+### Load and Call a Plugin
+
+```bash
+# From C:
+kvlite_plugin_load("/abs/path/to/plugin.dylib", &handle, &error);
+kvlite_plugin_call(handle, "health", "{}", &resp, &resp_len, &error);
+kvlite_plugin_close(handle, &error);
+
+# From the test host:
+gcc -o test_host test_host.c -Lkvlite -lkvlite -ldl
+DYLD_LIBRARY_PATH=kvlite ./test_host kvlite/libkvlite.dylib /abs/path/to/plugin.dylib
 ```
 
 ## Build Benchmark Tools
@@ -121,6 +166,7 @@ See [BENCHMARK_REVIEW.md](BENCHMARK_REVIEW.md) for the corrected interpretation;
 
 - Uses isolated temporary directories (`/tmp/kvlite-zig-proto-XXXXXX`) for every run
 - Writes its own manifest file (`KVLITE-ZIG-PROTO-MANIFEST.json`) to prevent accidental interop with Go host databases
-- Does NOT implement raw_* ops, scans, batches, collections, codecs, or module loading
+- Implements raw_* ops, scans, multi ops, batch apply, and ext plugin loading
+- Does NOT implement collections, codecs, or module loading
 - Does NOT claim on-disk compatibility with Go host
 - These are gaps to close toward a production-ready Zig host, not permanent scope exclusions

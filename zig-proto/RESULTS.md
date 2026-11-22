@@ -43,6 +43,39 @@ Both hosts correctly implement:
 
 ---
 
+## Ext Plugin System
+
+The Zig prototype now loads plugins through [ext](https://github.com/webong/ext)'s host
+infrastructure (`pkg/ext-zig`, released as `ext-zig-v0.2.0`, pinned to Zig 0.17).
+Three new C ABI symbols are exported:
+
+| Symbol | Description |
+|--------|-------------|
+| `kvlite_plugin_load(path, out_handle, out_error)` | `dlopen`s a plugin `.dylib`/`.so` exporting the ext C ABI, performs the ext handshake, and registers the plugin session |
+| `kvlite_plugin_call(handle, operation, request_json, out_response, out_response_length, out_error)` | Sends an ext invoke (op 2) to the plugin with KVLite wire-protocol JSON inside |
+| `kvlite_plugin_close(handle, out_error)` | Deinitializes the plugin session and removes it from the handle registry |
+
+KVLite's wire protocol (get/put/delete/scan/multi_get/multi_put/health) rides inside
+`ext_plugin_call`'s JSON request/response. The plugin's response must follow the ext
+wire format: `{"apiVersion":"ext.plugin/v1","id":"<request-id>","payload":{...}|null,"error":null|{code,message}}`.
+
+An example plugin (`test_plugin.c`) is included in the repo — an in-memory KV store
+that implements all seven operations. End-to-end testing confirms:
+
+```
+kvlite_plugin_load("/abs/test_plugin.dylib") → handle=1
+kvlite_plugin_call(handle, "health", "{}")   → {"status":"healthy","ready":true}
+kvlite_plugin_call(handle, "put", {...foo=bar...}) → {"ok":true}
+kvlite_plugin_call(handle, "get", {...key=foo...}) → {"value":"bar","found":true}
+kvlite_plugin_close(handle) → OK
+```
+
+The ext issue [webong/ext#203](https://github.com/webong/ext/issues/203) was filed
+requesting an `ext.kv` capability contract and host-layer guidance for KVLite's
+plugin adoption.
+
+---
+
 ## Benchmark Results (1000 ops, synchronous LMDB commits)
 
 ### Write Workloads (put/del) — 1 thread, 64 B values

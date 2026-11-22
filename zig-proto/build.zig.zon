@@ -1,0 +1,13 @@
+.{
+    .name = .zig_proto,
+    .version = "0.0.1",
+    .dependencies = .{
+        .ext_io = .{
+            .url = "https://github.com/webong/ext/archive/refs/tags/ext-zig-0.2.0.tar.gz",
+            .hash = "ext_io-0.2.0-H4LWj5cMEQALuoU1J0AOSqwhIqDlwMrffFHqh8L6G-u-",
+        },
+    },
+    .minimum_zig_version = "0.17.1",
+    .paths = .{""},
+    .fingerprint = 0x12d8eac264b6fa36,
+}
