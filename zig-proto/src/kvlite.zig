@@ -1050,31 +1050,13 @@ fn rawGetExport(
     }
 
     const stored = @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..data_val.mv_size];
-    const envelope = decodeEnvelope(stored) orelse {
-        lmdb.mdb_txn_abort(txn.?);
-        setError(out_error, "kvlite: invalid value envelope", .{});
-        return STORAGE_ERROR;
-    };
-    if (envelope.expires_at != 0 and currentUnixNanos() >= envelope.expires_at) {
-        lmdb.mdb_txn_abort(txn.?);
-        // Mirror the Go core: an expired value is never returned, and the
-        // read deletes it opportunistically.
-        const storage_length = 1 + key_length;
-        var key_buffer2 = KeyBuffer{};
-        defer key_buffer2.deinit();
-        const storage_key2 = buildStorageKey(@ptrCast(key.?), key_length, key_buffer2.get(storage_length));
-        deleteStorageKey(db, storage_key2);
-        setError(out_error, "kvlite: key not found", .{});
-        return NOT_FOUND;
-    }
-    const payload_length = envelope.payload.len;
-    const block = mallocOrDie(@max(payload_length, 1));
-    if (payload_length > 0) {
-        @memcpy(block[0..payload_length], envelope.payload);
+    const block = mallocOrDie(@max(stored.len, 1));
+    if (stored.len > 0) {
+        @memcpy(block[0..stored.len], stored);
     }
     lmdb.mdb_txn_abort(txn.?);
     out_value.?.* = @ptrCast(block);
-    out_length.?.* = payload_length;
+    out_length.?.* = stored.len;
     return OK;
 }
 
@@ -1465,7 +1447,15 @@ fn rawScanCloseExport(
         setError(out_error, "kvlite: invalid argument: invalid scan cursor handle {d}", .{cursor_handle});
         return INVALID_ARGUMENT;
     };
-    // No cursor or transaction to clean up in simplified implementation
+    if (scan.cursor) |c| {
+        lmdb.mdb_cursor_close(c);
+    }
+    if (scan.txn) |t| {
+        lmdb.mdb_txn_abort(t);
+    }
+    if (scan.prefix) |p| {
+        free(p);
+    }
     free(toFree(@ptrCast(scan)));
     return OK;
 }
@@ -1486,6 +1476,74 @@ const MultiPutEntry = extern struct {
     value_length: usize,
 };
 
+// A contiguous key-range assigned to one worker thread during raw_multi_get.
+const ReadBatch = struct {
+    db: *Database,
+    results: *MultiGetResult,
+    start: usize,
+    end: usize,
+    done: *std.atomic.Value(usize),
+};
+
+fn readWorker(
+    db: *Database,
+    results: *MultiGetResult,
+    start: usize,
+    end: usize,
+    done: *std.atomic.Value(usize),
+) void {
+    var txn: ?*lmdb.Txn = null;
+    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, lmdb.NOTLS | lmdb.RDONLY, &txn)) or txn == null) {
+        var i = start;
+        while (i < end) : (i += 1) {
+            const r = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results) + i * @sizeOf(MultiGetResult)));
+            r.status = STORAGE_ERROR;
+            r.value = null;
+            r.value_length = 0;
+        }
+        _ = done.fetchAdd(1, .release);
+        return;
+    }
+
+    var i = start;
+    while (i < end) : (i += 1) {
+        const r = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results) + i * @sizeOf(MultiGetResult)));
+        if (r.key_length == 0 or r.key == null) {
+            r.status = STORAGE_ERROR;
+            r.value = null;
+            r.value_length = 0;
+            continue;
+        }
+
+        var key_val = lmdb.Val{ .mv_size = r.key_length, .mv_data = @constCast(@ptrCast(r.key.?)) };
+        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
+        const rc = lmdb.mdb_get(txn.?, db.dbi, &key_val, &data_val);
+        if (lmdb.isError(rc)) {
+            if (rc == lmdb.NOTFOUND) {
+                r.status = NOT_FOUND;
+                r.value = null;
+                r.value_length = 0;
+            } else {
+                r.status = STORAGE_ERROR;
+                r.value = null;
+                r.value_length = 0;
+            }
+        } else {
+            const payload_length = data_val.mv_size;
+            const block = mallocOrDie(@max(payload_length, 1));
+            if (payload_length > 0) {
+                @memcpy(block[0..payload_length], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..payload_length]);
+            }
+            r.value = @ptrCast(block);
+            r.value_length = payload_length;
+            r.status = OK;
+        }
+    }
+
+    lmdb.mdb_txn_abort(txn.?);
+    _ = done.fetchAdd(1, .release);
+}
+
 fn rawMultiGetExport(
     handle: u64,
     results: ?*MultiGetResult,
@@ -1502,10 +1560,10 @@ fn rawMultiGetExport(
         return INVALID_ARGUMENT;
     }
 
-    var txn: ?*lmdb.Txn = null;
-    if (lmdb.isError(lmdb.mdb_txn_begin(db.env, null, lmdb.RDONLY, &txn)) or txn == null) {
-        setError(out_error, "kvlite: LMDB: begin read transaction failed", .{});
-        return STORAGE_ERROR;
+    // Bounds check: refuse absurdly large counts that could overflow pointer math.
+    if (count > 1_000_000) {
+        setError(out_error, "kvlite: invalid argument: count {d} exceeds maximum 1,000,000", .{count});
+        return INVALID_ARGUMENT;
     }
 
     const mut_ptr = @as(*MultiGetResult, @ptrCast(@constCast(results.?)));
@@ -1513,48 +1571,69 @@ fn rawMultiGetExport(
     while (i < count) : (i += 1) {
         const r = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult)));
         if (r.key_length == 0 or r.key == null) {
-            // Skip invalid entries
-            const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
-            r_ptr.status = STORAGE_ERROR;
-            r_ptr.value = null;
-            r_ptr.value_length = 0;
+            // Mark invalid entries so the caller can see they were skipped.
+            r.status = STORAGE_ERROR;
+            r.value = null;
+            r.value_length = 0;
             continue;
         }
         if (r.key_length > db.max_key_size) {
-            lmdb.mdb_txn_abort(txn.?);
-            setError(out_error, "kvlite: result[{d}] key too large", .{i});
+            setError(out_error, "kvlite: result[{d}] key is {d} bytes; maximum is {d}", .{ i, r.key_length, db.max_key_size });
             return STORAGE_ERROR;
-        }
-
-        var key_val = lmdb.Val{ .mv_size = r.key_length, .mv_data = @constCast(@ptrCast(r.key.?)) };
-        var data_val = lmdb.Val{ .mv_size = 0, .mv_data = null };
-        const rc = lmdb.mdb_get(txn.?, db.dbi, &key_val, &data_val);
-        if (lmdb.isError(rc)) {
-            if (rc == lmdb.NOTFOUND) {
-                const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
-                r_ptr.status = NOT_FOUND;
-                r_ptr.value = null;
-                r_ptr.value_length = 0;
-            } else {
-                const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
-                r_ptr.status = STORAGE_ERROR;
-                r_ptr.value = null;
-                r_ptr.value_length = 0;
-            }
-        } else {
-            const payload_length = data_val.mv_size;
-            const block = mallocOrDie(@max(payload_length, 1));
-            if (payload_length > 0) {
-                @memcpy(block[0..payload_length], @as([*]const u8, @ptrCast(data_val.mv_data.?))[0..payload_length]);
-            }
-            const r_ptr = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(results.?) + i * @sizeOf(MultiGetResult)));
-            r_ptr.value = @ptrCast(block);
-            r_ptr.value_length = payload_length;
-            r_ptr.status = OK;
         }
     }
 
-    lmdb.mdb_txn_abort(txn.?);
+    // Determine thread count: cap at 4, use 1 thread for small counts.
+    const max_threads: usize = 4;
+    const thread_count: usize = if (count <= max_threads) 1 else max_threads;
+
+    var done = std.atomic.Value(usize).init(0);
+
+    // Split key ranges across worker threads.
+    var base: usize = 0;
+    var remaining: usize = count;
+    var t: usize = 0;
+    while (t < thread_count) : (t += 1) {
+        if (remaining == 0) break;
+        const per_thread = (remaining + (thread_count - t) - 1) / (thread_count - t);
+        const start = base;
+        const end = base + per_thread;
+
+        // Spawn worker; if spawning fails, fall back to inline execution.
+        const spawn_result = std.Thread.spawn(.{}, readWorker, .{
+            db,
+            results.?,
+            start,
+            end,
+            &done,
+        });
+        if (spawn_result) |_| {
+            // Thread running; nothing to do here.
+        } else |_| {
+            // Spawn failed: process this range inline.
+            readWorker(db, results.?, start, end, &done);
+        }
+
+        base = end;
+        remaining -= per_thread;
+    }
+
+    // Spin-wait for all threads to signal completion via the atomic counter.
+    // Do NOT key off result.status (OK == 0, so status == 0 means done, not pending).
+    while (done.load(.acquire) < count) {
+        std.atomic.spinLoopHint();
+    }
+
+    // Check for storage errors after all threads have completed.
+    i = 0;
+    while (i < count) : (i += 1) {
+        const r = @as(*MultiGetResult, @ptrFromInt(@intFromPtr(mut_ptr) + i * @sizeOf(MultiGetResult)));
+        if (r.status == STORAGE_ERROR) {
+            setError(out_error, "kvlite: result[{d}] storage error", .{i});
+            return STORAGE_ERROR;
+        }
+    }
+
     return OK;
 }
 
